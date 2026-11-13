@@ -218,7 +218,7 @@ export default function WritingView() {
           </Button>
         </Space.Compact>
         {refsErr ? <ErrorNotice error={refsErr} /> : null}
-        {refs && (
+        {refs ? (
           <>
             <div className="rec-meta">
               {refs.sources_used.map((s) => (
@@ -264,6 +264,17 @@ export default function WritingView() {
               </div>
             </div>
           </>
+        ) : (
+          <div className="refs-columns">
+            <div className="refs-col refs-verified">
+              <h4>已核验（0）</h4>
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无数据，点击「生成」开始核验" />
+            </div>
+            <div className="refs-col refs-dropped">
+              <h4>已剔除（0）</h4>
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无剔除条目" />
+            </div>
+          </div>
         )}
       </section>
 

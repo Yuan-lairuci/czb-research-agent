@@ -48,7 +48,17 @@ export default function QaPanel({ papers, selectedId, indexInfo, onJump }: Props
     } catch (e) {
       setTurns((xs) =>
         xs.map((t) =>
-          t.id === id ? { ...t, loading: false, error: e instanceof Error ? e.message : '提问失败' } : t,
+          t.id === id
+            ? {
+                ...t,
+                loading: false,
+                error: api.isModelUnavailable(e)
+                  ? '模型服务未配置：问答依赖大模型服务，配置 LLM_API_KEY 后即可启用。'
+                  : e instanceof Error
+                    ? e.message
+                    : '提问失败',
+              }
+            : t,
         ),
       )
     }
