@@ -1,0 +1,2 @@
+networkx>=3.0
+scipy>=1.10  # networkx.pagerank 的硬依赖（_pagerank_scipy）
