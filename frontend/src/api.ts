@@ -5,12 +5,37 @@
 import type {
   AskRequest,
   AskResponse,
+  BlockTranslation,
+  ByPaperResponse,
+  ChartResponse,
+  ChartType,
+  CitationGraph,
   DedupScanResponse,
+  DiagramKind,
+  DiagramResponse,
+  FeedbackResponse,
+  FetchResponse,
+  FutureWorkResponse,
+  GraphAnalyzeResponse,
+  GraphBuildResponse,
   IndexResponse,
+  OutlineResponse,
   PaperInfo,
   PaperListResponse,
+  PaperTranslateResponse,
   ParsedContract,
   QaStatusResponse,
+  Recommendation,
+  ReferencesResponse,
+  RefStyle,
+  ReviewResponse,
+  SearchResponse,
+  TrackItem,
+  TrackListResponse,
+  TrackRunResponse,
+  TranslateDirection,
+  TranslateResponse,
+  Zh2EnResponse,
 } from './types'
 
 // 后端地址：默认直连本地 8000，可用 VITE_API_BASE 覆盖
@@ -110,3 +135,258 @@ export async function fetchPaperPdf(paperId: string): Promise<Uint8Array | null>
   }
   return null
 }
+
+// ============ 通用错误辅助 ============
+
+/** 生成服务未配置/不可用（LLM 502）判定：UI 显示"模型服务未配置"占位。 */
+export function isModelUnavailable(e: unknown): boolean {
+  if (e instanceof ApiError) {
+    return e.status === 502 || /生成服务不可用|模型服务|LLM/i.test(e.message)
+  }
+  return false
+}
+
+/** 后端不可达（网络层失败）。 */
+export function isBackendUnreachable(e: unknown): boolean {
+  return !(e instanceof ApiError) && e instanceof Error && /fetch|network|Failed to fetch/i.test(e.message)
+}
+
+// ============ 模块三 翻译 ============
+
+export function translateText(
+  text: string,
+  direction: TranslateDirection = 'en2zh',
+): Promise<TranslateResponse> {
+  return request<TranslateResponse>('/api/translate/text', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text, direction, stream: false }),
+  })
+}
+
+/**
+ * SSE 流式翻译：data: {"delta","done"[,"translated","engine"]} … data: [DONE]。
+ * 每帧回调 onDelta（增量文本），返回最终全文。
+ */
+export async function translateTextStream(
+  text: string,
+  direction: TranslateDirection,
+  onDelta: (delta: string, full: string) => void,
+  signal?: AbortSignal,
+): Promise<TranslateResponse> {
+  const res = await fetch(`${BASE}/api/translate/text`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+    body: JSON.stringify({ text, direction, stream: true }),
+    signal,
+  })
+  if (!res.ok) throw await parseError(res)
+  const reader = res.body?.getReader()
+  if (!reader) throw new ApiError(0, '流式响应不可用')
+  const decoder = new TextDecoder('utf-8')
+  let buffer = ''
+  let full = ''
+  let engine = ''
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const frames = buffer.split('\n\n')
+    buffer = frames.pop() ?? ''
+    for (const frame of frames) {
+      for (const line of frame.split('\n')) {
+        if (!line.startsWith('data: ')) continue
+        const payload = line.slice(6).trim()
+        if (payload === '[DONE]') continue
+        try {
+          const obj = JSON.parse(payload) as {
+            delta?: string
+            done?: boolean
+            translated?: string
+            engine?: string
+          }
+          if (typeof obj.delta === 'string' && obj.delta) {
+            full += obj.delta
+            onDelta(obj.delta, full)
+          }
+          if (obj.done && typeof obj.translated === 'string') {
+            full = obj.translated
+            if (typeof obj.engine === 'string') engine = obj.engine
+          }
+        } catch {
+          /* 忽略无法解析的帧 */
+        }
+      }
+    }
+  }
+  return { translated: full, engine }
+}
+
+export function translatePage(
+  paperId: string,
+  pageNo: number,
+  direction: TranslateDirection = 'en2zh',
+): Promise<BlockTranslation[]> {
+  return request<BlockTranslation[]>('/api/translate/page', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ paper_id: paperId, page_no: pageNo, direction }),
+  })
+}
+
+/** GET /api/translate/paper/{id}?direction=&fill= （fill=true 补译缺页） */
+export function translatePaper(
+  paperId: string,
+  direction: TranslateDirection = 'en2zh',
+  fill = false,
+): Promise<PaperTranslateResponse> {
+  return request<PaperTranslateResponse>(
+    `/api/translate/paper/${paperId}?direction=${direction}&fill=${fill ? 'true' : 'false'}`,
+  )
+}
+
+// ============ 模块四 检索推荐 ============
+
+export function recommendSearch(query: string, limit = 10): Promise<SearchResponse> {
+  return request<SearchResponse>('/api/recommend/search', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query, limit }),
+  })
+}
+
+export function recommendFetch(arxivId: string): Promise<FetchResponse> {
+  return request<FetchResponse>('/api/recommend/fetch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ arxiv_id: arxivId }),
+  })
+}
+
+export function recommendByPaper(paperId: string, topK = 10): Promise<ByPaperResponse> {
+  return request<ByPaperResponse>('/api/recommend/by-paper', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ paper_id: paperId, top_k: topK }),
+  })
+}
+
+export function recommendFeedback(
+  like: boolean,
+  ids: { s2_id?: string; arxiv_id?: string },
+): Promise<FeedbackResponse> {
+  return request<FeedbackResponse>('/api/recommend/feedback', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...ids, like }),
+  })
+}
+
+// ============ arXiv 版本追踪 ============
+
+export function trackAdd(arxivId: string): Promise<TrackItem> {
+  return request<TrackItem>('/api/track/add', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ arxiv_id: arxivId }),
+  })
+}
+
+export function trackList(): Promise<TrackListResponse> {
+  return request<TrackListResponse>('/api/track/list')
+}
+
+export function trackRun(): Promise<TrackRunResponse> {
+  return request<TrackRunResponse>('/api/track/run', { method: 'POST' })
+}
+
+// ============ 模块五 引用图谱 ============
+
+export function graphBuild(paperIds?: string[]): Promise<GraphBuildResponse> {
+  return request<GraphBuildResponse>('/api/graph/build', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(paperIds ? { paper_ids: paperIds } : {}),
+  })
+}
+
+export function graphAnalyze(graphId: string): Promise<GraphAnalyzeResponse> {
+  return request<GraphAnalyzeResponse>('/api/graph/analyze', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ graph_id: graphId }),
+  })
+}
+
+export function graphGet(graphId: string): Promise<CitationGraph> {
+  return request<CitationGraph>(`/api/graph/${graphId}`)
+}
+
+export function graphReview(graphId: string, topic?: string): Promise<ReviewResponse> {
+  return request<ReviewResponse>('/api/graph/review', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(topic ? { graph_id: graphId, topic } : { graph_id: graphId }),
+  })
+}
+
+export function graphFutureWork(graphId: string): Promise<FutureWorkResponse> {
+  return request<FutureWorkResponse>('/api/graph/future-work', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ graph_id: graphId }),
+  })
+}
+
+// ============ 模块六 写作 Copilot ============
+
+export function writingOutline(idea: string, sections?: string[]): Promise<OutlineResponse> {
+  return request<OutlineResponse>('/api/writing/outline', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(sections ? { idea, sections } : { idea }),
+  })
+}
+
+export function writingReferences(params: {
+  topic?: string
+  paper_ids?: string[]
+  style?: RefStyle
+  limit?: number
+}): Promise<ReferencesResponse> {
+  return request<ReferencesResponse>('/api/writing/references', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  })
+}
+
+export function writingDiagram(kind: DiagramKind, description: string): Promise<DiagramResponse> {
+  return request<DiagramResponse>('/api/writing/diagram', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ kind, description }),
+  })
+}
+
+export function writingChart(params: {
+  rows?: Array<Record<string, unknown>>
+  csv_text?: string
+  chart_type: ChartType
+  title?: string
+}): Promise<ChartResponse> {
+  return request<ChartResponse>('/api/writing/chart', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  })
+}
+
+export function writingZh2En(text: string): Promise<Zh2EnResponse> {
+  return request<Zh2EnResponse>('/api/writing/zh2en', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  })
+}
+
