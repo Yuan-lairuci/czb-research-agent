@@ -1,0 +1,4 @@
+# 模块三翻译后端：无新增第三方依赖。
+# 运行依赖见 requirements.txt（fastapi / uvicorn / pydantic / httpx）；
+# 缓存使用 Python 标准库 sqlite3，测试使用 pytest（均在主 requirements 内）。
+-r requirements.txt
