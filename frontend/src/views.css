@@ -225,3 +225,110 @@
   color: #94a3b8;
   text-align: right;
 }
+
+/* ===== 检索推荐 ===== */
+.view-recommend {
+  overflow: auto;
+}
+.section-title {
+  margin: 0 0 10px;
+  font-size: 15px;
+  color: #1e3a8a;
+}
+.rec-search-bar {
+  display: flex;
+  margin-bottom: 10px;
+  width: 100%;
+  max-width: 720px;
+}
+.rec-search-bar .ant-input {
+  flex: 1;
+}
+.rec-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.rec-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.rec-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #ffffff;
+}
+.rec-card-title {
+  font-weight: 600;
+  color: #0f172a;
+  margin-bottom: 6px;
+}
+.rec-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.rec-card-abstract {
+  font-size: 12px;
+  color: #475569;
+  margin-bottom: 6px;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.rec-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.rec-link {
+  font-size: 12px;
+}
+.rec-fetch-alert {
+  margin-top: 8px;
+}
+.rec-reasons {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: #475569;
+}
+.rec-track-alert {
+  margin-bottom: 10px;
+}
+.rec-updates {
+  margin: 0;
+  padding-left: 18px;
+}
+.rec-update-err {
+  color: #b91c1c;
+}
+.rec-track-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.rec-track-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #ffffff;
+  flex-wrap: wrap;
+}
+.rec-track-title {
+  font-weight: 600;
+  color: #0f172a;
+}
+.rec-track-time {
+  margin-left: auto;
+  font-size: 11px;
+  color: #94a3b8;
+}
