@@ -4,6 +4,8 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.pdf_library import router as pdf_library_router
+from app.api.qa import router as qa_router
 from app.api.routes import router
 
 app = FastAPI(title="科研助手 Agent", version="0.1.0")
@@ -18,3 +20,5 @@ app.add_middleware(
 )
 
 app.include_router(router)
+app.include_router(pdf_library_router)
+app.include_router(qa_router)

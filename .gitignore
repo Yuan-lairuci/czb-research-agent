@@ -25,9 +25,10 @@ Thumbs.db
 # ===== 日志与临时文件 =====
 *.log
 
-# ===== 模块一运行时数据 =====
-backend/data/library/
-backend/data/parsed/
+# ===== 后端运行时数据（文献库/解析/索引/缓存，全部不入库） =====
+backend/data/
 
-# ===== 模块二运行时数据 =====
-backend/data/index/
+# ===== 本地垃圾（pip/pytest 遗留） =====
+pip-unpack-*/
+pytest-of-yuanl/
+backend/tmpsp_*/
