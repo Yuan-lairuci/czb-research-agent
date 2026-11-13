@@ -3,6 +3,26 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
+
+
+def _load_env_files() -> None:
+    """启动时加载 .env（backend/ 或仓库根目录），不覆盖已存在的环境变量。"""
+    here = Path(__file__).resolve()
+    for env_path in (here.parents[2] / ".env", here.parents[3] / ".env"):
+        try:
+            lines = env_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            os.environ.setdefault(key.strip(), value.strip())
+
+
+_load_env_files()
 
 
 def _env(name: str, default: str = "") -> str:
