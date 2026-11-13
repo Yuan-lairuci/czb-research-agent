@@ -49,6 +49,41 @@ def test_upload_list_get_delete_lifecycle(tmp_path):
     assert client.get(f"/api/library/papers/{info['paper_id']}/parsed").status_code == 404
 
 
+def test_download_file_endpoint(tmp_path):
+    client = make_client(tmp_path)
+    src = tmp_path / "dl.pdf"
+    shutil.copyfile(V1, src)
+    resp = client.post(
+        "/api/library/papers",
+        files={"file": ("1706.03762v1.pdf", src.read_bytes(), "application/pdf")},
+    )
+    pid = resp.json()["paper_id"]
+    r = client.get(f"/api/library/papers/{pid}/file")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/pdf"
+    assert "1706.03762v1.pdf" in r.headers["content-disposition"]
+    assert r.content[:5] == b"%PDF-"
+
+
+def test_download_file_404(tmp_path):
+    client = make_client(tmp_path)
+    missing = client.get("/api/library/papers/deadbeef0000/file")
+    assert missing.status_code == 404
+    assert "not found" in missing.json()["detail"]
+
+    src = tmp_path / "dl2.pdf"
+    shutil.copyfile(V1, src)
+    resp = client.post(
+        "/api/library/papers",
+        files={"file": ("1706.03762v1.pdf", src.read_bytes(), "application/pdf")},
+    )
+    pid = resp.json()["paper_id"]
+    (tmp_path / "data" / "library" / f"{pid}.pdf").unlink()
+    gone = client.get(f"/api/library/papers/{pid}/file")
+    assert gone.status_code == 404
+    assert "not found" in gone.json()["detail"]
+
+
 def test_upload_rejects_non_pdf(tmp_path):
     client = make_client(tmp_path)
     resp = client.post(

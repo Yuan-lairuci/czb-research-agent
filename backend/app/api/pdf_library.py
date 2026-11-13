@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 
 from app.models.paper_models import (
     DedupScanResponse,
@@ -128,6 +129,14 @@ def create_library_router(data_dir: Path | str | None = None) -> APIRouter:
         if contract is None:
             raise HTTPException(status_code=404, detail=f"parsed contract for {paper_id} not found")
         return contract
+
+    @router.get("/papers/{paper_id}/file")
+    async def download_paper(paper_id: str) -> FileResponse:
+        row = _require_row(paper_id)
+        saved = library_dir / f"{paper_id}.pdf"
+        if not saved.exists():
+            raise HTTPException(status_code=404, detail=f"file for {paper_id} not found")
+        return FileResponse(saved, media_type="application/pdf", filename=row["source_filename"])
 
     @router.delete("/papers/{paper_id}")
     async def delete_paper(paper_id: str) -> dict[str, str]:
