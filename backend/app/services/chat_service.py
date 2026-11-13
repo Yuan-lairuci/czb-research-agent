@@ -47,7 +47,9 @@ class ChatService:
             data = resp.json()
         return data["choices"][0]["message"]["content"]
 
-    async def chat_stream(self, messages: list[dict[str, str]], **kwargs: Any) -> AsyncIterator[str]:
+    async def chat_stream(
+        self, messages: list[dict[str, str]], **kwargs: Any
+    ) -> AsyncIterator[str]:
         """流式对话：解析 SSE data: 帧，逐段产出增量文本。"""
         payload = self._payload(messages, stream=True, **kwargs)
         async with httpx.AsyncClient(timeout=60.0) as client:
