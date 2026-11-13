@@ -1,0 +1,6 @@
+# Ruff 配置（后端 Linter）
+line-length = 100
+target-version = "py311"
+
+[lint]
+select = ["E", "F", "I", "UP", "B"]
