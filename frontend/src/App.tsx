@@ -5,6 +5,7 @@ import TopBar, { isViewKey, type ViewKey } from './components/TopBar'
 import LibraryPanel from './components/LibraryPanel'
 import ReaderPanel from './components/ReaderPanel'
 import QaPanel from './components/QaPanel'
+import TranslationPanel from './components/TranslationPanel'
 import RecommendView from './components/RecommendView'
 import GraphView from './components/GraphView'
 import WritingView from './components/WritingView'
@@ -43,7 +44,14 @@ function Workspace() {
   const [listLoading, setListLoading] = useState(true)
   const [jump, setJump] = useState<JumpRequest | null>(null)
   const [view, setView] = useState<ViewKey>(() => currentView())
+  const [selection, setSelection] = useState<{ text: string; nonce: number } | null>(null)
   const jumpNonce = useRef(0)
+  const selNonce = useRef(0)
+
+  const handleSelectText = useCallback((text: string) => {
+    selNonce.current += 1
+    setSelection({ text, nonce: selNonce.current })
+  }, [])
 
   useEffect(() => {
     const onHash = () => setView(currentView())
@@ -138,6 +146,10 @@ function Workspace() {
               scanGroups={scanGroups}
               indexInfo={indexInfo}
               onSelect={setSelectedId}
+              onOpen={(id) => {
+                setSelectedId(id)
+                switchView('reader')
+              }}
               onChanged={refreshList}
               onScanned={setScanGroups}
               onIndexed={handleIndexed}
@@ -152,7 +164,9 @@ function Workspace() {
               parsed={parsed}
               jump={jump}
               onJumpConsumed={() => setJump(null)}
+              onSelectText={handleSelectText}
             />
+            <TranslationPanel paper={selectedPaper} parsed={parsed} selection={selection} />
           </div>
         )}
         {view === 'qa' && (

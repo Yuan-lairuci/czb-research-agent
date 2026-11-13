@@ -11,6 +11,8 @@ interface Props {
   parsed: ParsedContract | null
   jump: JumpRequest | null
   onJumpConsumed: () => void
+  /** 划词选中文本回调（翻译面板数据源） */
+  onSelectText?: (text: string) => void
 }
 
 interface HeadingNode {
@@ -46,7 +48,7 @@ function wrapLayerCitations(container: HTMLElement, onRefClick: (n: number) => v
 }
 
 /** 中栏·PDF 阅读器：pdfjs 渲染 / 页导航 / 标题树 / 引用双向联动 */
-export default function ReaderPanel({ paper, parsed, jump, onJumpConsumed }: Props) {
+export default function ReaderPanel({ paper, parsed, jump, onJumpConsumed, onSelectText }: Props) {
   const [pdfDoc, setPdfDoc] = useState<PDFDocumentProxy | null>(null)
   const [pdfLoading, setPdfLoading] = useState(false)
   const [pdfNote, setPdfNote] = useState<string | null>(null)
@@ -160,6 +162,13 @@ export default function ReaderPanel({ paper, parsed, jump, onJumpConsumed }: Pro
     setHighlightRef(n)
   }, [])
 
+  // 划词：mouseup 时取当前选中文本交翻译面板
+  const handleMouseUp = useCallback(() => {
+    if (!onSelectText) return
+    const text = (window.getSelection()?.toString() ?? '').trim()
+    if (text.length >= 2) onSelectText(text)
+  }, [onSelectText])
+
   const jumpToReference = useCallback(
     (index: number) => {
       setHighlightRef(index)
@@ -182,7 +191,7 @@ export default function ReaderPanel({ paper, parsed, jump, onJumpConsumed }: Pro
   }
 
   return (
-    <main className="panel panel-reader">
+    <main className="panel panel-reader" onMouseUp={handleMouseUp}>
       <div className="reader-head">
         <div className="reader-title" title={paper.title}>
           {paper.title || paper.source_filename}

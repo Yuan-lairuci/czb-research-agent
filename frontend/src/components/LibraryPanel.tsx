@@ -12,6 +12,8 @@ interface Props {
   scanGroups: DedupGroup[]
   indexInfo: Record<string, number>
   onSelect: (id: string) => void
+  /** 点「阅读」时额外通知（跳转阅读器视图） */
+  onOpen?: (id: string) => void
   onChanged: () => void | Promise<void>
   onScanned: (groups: DedupGroup[]) => void
   onIndexed: (id: string, numChunks: number) => void
@@ -42,6 +44,7 @@ export default function LibraryPanel({
   scanGroups,
   indexInfo,
   onSelect,
+  onOpen,
   onChanged,
   onScanned,
   onIndexed,
@@ -235,7 +238,7 @@ export default function LibraryPanel({
                 <Button
                   size="small"
                   type={paper.paper_id === selectedId ? 'primary' : 'default'}
-                  onClick={() => onSelect(paper.paper_id)}
+                  onClick={() => (onOpen ?? onSelect)(paper.paper_id)}
                 >
                   阅读
                 </Button>
