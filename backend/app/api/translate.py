@@ -84,11 +84,16 @@ async def _sse_events(text: str, direction: Direction) -> AsyncIterator[str]:
 
     客户端断开时生成器被 close，未完成的生成自然中止（优雅结束，不落半截缓存）。
     """
-    stream, engine_label = get_engine().stream_translation(text, direction)
     parts: list[str] = []
-    async for delta in stream:
-        parts.append(delta)
-        yield _sse_frame({"delta": delta, "done": False})
+    try:
+        stream, engine_label = get_engine().stream_translation(text, direction)
+        async for delta in stream:
+            parts.append(delta)
+            yield _sse_frame({"delta": delta, "done": False})
+    except ChatServiceError as exc:
+        yield _sse_frame({"error": f"生成服务不可用: {exc}", "done": False})
+        yield "data: [DONE]\n\n"
+        return
     full = "".join(parts)
     yield _sse_frame({"delta": "", "done": True, "translated": full, "engine": engine_label})
     yield "data: [DONE]\n\n"

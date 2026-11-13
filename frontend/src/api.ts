@@ -187,7 +187,14 @@ export async function translateTextStream(
   let full = ''
   let engine = ''
   for (;;) {
-    const { done, value } = await reader.read()
+    let chunk: ReadableStreamReadResult<Uint8Array>
+    try {
+      chunk = await reader.read()
+    } catch (e) {
+      if (e instanceof DOMException && e.name === 'AbortError') throw e
+      throw new ApiError(502, `流式翻译中断：${e instanceof Error ? e.message : String(e)}`)
+    }
+    const { done, value } = chunk
     if (done) break
     buffer += decoder.decode(value, { stream: true })
     const frames = buffer.split('\n\n')
@@ -203,6 +210,10 @@ export async function translateTextStream(
             done?: boolean
             translated?: string
             engine?: string
+            error?: string
+          }
+          if (typeof obj.error === 'string' && obj.error) {
+            throw new ApiError(502, obj.error)
           }
           if (typeof obj.delta === 'string' && obj.delta) {
             full += obj.delta
@@ -212,7 +223,8 @@ export async function translateTextStream(
             full = obj.translated
             if (typeof obj.engine === 'string') engine = obj.engine
           }
-        } catch {
+        } catch (e) {
+          if (e instanceof ApiError) throw e
           /* 忽略无法解析的帧 */
         }
       }
