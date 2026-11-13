@@ -1,0 +1,7 @@
+# Wave-2 模块一（PDF 管理与细粒度解析）新增依赖
+# pymupdf: PDF 细粒度解析（新版 import pymupdf，无 fitz 别名）
+pymupdf>=1.24
+# python-multipart: FastAPI multipart 上传端点所需
+python-multipart>=0.0.9
+# rapidocr-onnxruntime: 轻量扫描件 OCR 引擎（首选）
+rapidocr-onnxruntime>=1.3
