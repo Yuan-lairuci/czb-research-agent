@@ -468,3 +468,157 @@
 .ref-modal-body p {
   margin: 4px 0;
 }
+
+/* ===== 写作 Copilot ===== */
+.view-writing {
+  overflow: auto;
+}
+.writing-actions {
+  margin-top: 8px;
+}
+.writing-bar {
+  display: flex;
+  width: 100%;
+  max-width: 860px;
+  margin-bottom: 10px;
+}
+.outline-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+.outline-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #ffffff;
+}
+.outline-card-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: #1e3a8a;
+  margin-bottom: 6px;
+}
+.outline-card ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: #475569;
+}
+.outline-card li {
+  margin-bottom: 3px;
+}
+.refs-columns {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+.refs-col {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.refs-col h4 {
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+.refs-verified {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+.refs-verified h4 {
+  color: #15803d;
+}
+.refs-dropped {
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+.refs-dropped h4 {
+  color: #b91c1c;
+}
+.ref-item {
+  padding: 8px 0;
+  border-bottom: 1px dashed #e2e8f0;
+}
+.ref-item:last-child {
+  border-bottom: none;
+}
+.ref-formatted {
+  font-size: 12px;
+  color: #0f172a;
+  line-height: 1.6;
+}
+.ref-item-dropped .ref-formatted {
+  color: #64748b;
+  text-decoration: line-through;
+}
+.ref-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+.diagram-box {
+  margin-top: 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.diagram-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+}
+.diagram-code {
+  margin: 0;
+  padding: 12px;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-size: 12px;
+  overflow: auto;
+  max-height: 320px;
+}
+.diagram-hint {
+  padding: 8px 12px;
+  font-size: 11px;
+  color: #64748b;
+  background: #f8fafc;
+}
+.chart-form {
+  display: flex;
+  gap: 12px;
+  align-items: stretch;
+}
+.chart-csv {
+  flex: 1;
+  font-family: Consolas, monospace;
+  font-size: 12px;
+}
+.chart-ctrl {
+  width: 160px;
+}
+.chart-result {
+  margin-top: 12px;
+}
+.chart-canvas {
+  height: 360px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #ffffff;
+}
+.chart-caption {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #475569;
+  text-align: center;
+  font-style: italic;
+}
