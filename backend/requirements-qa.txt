@@ -1,0 +1,5 @@
+# Wave-2 模块二（RAG 问答）额外依赖；公共 requirements.txt 不动。
+# 必需
+numpy>=1.26
+# 可选：Chroma 向量库适配（vector_store.py 在 chromadb 可导入时才启用；本地装不上不算失败）
+chromadb>=0.5
