@@ -1,10 +1,28 @@
-import { Tooltip } from 'antd'
 import HealthStatus from './HealthStatus'
 
-/** 顶栏：品牌 + 导航占位（检索推荐/图谱/综述/写作，FE-2 接入）+ 后端状态 */
-const NAV_ITEMS = ['检索推荐', '图谱', '综述', '写作'] as const
+export type ViewKey = 'library' | 'reader' | 'qa' | 'recommend' | 'graph' | 'writing' | 'help'
 
-export default function TopBar() {
+export const NAV_ITEMS: { key: ViewKey; label: string }[] = [
+  { key: 'library', label: '文献库' },
+  { key: 'reader', label: '阅读器+翻译' },
+  { key: 'qa', label: 'AI 问答' },
+  { key: 'recommend', label: '检索推荐' },
+  { key: 'graph', label: '引用图谱' },
+  { key: 'writing', label: '写作 Copilot' },
+  { key: 'help', label: '帮助' },
+]
+
+export function isViewKey(v: string | null): v is ViewKey {
+  return NAV_ITEMS.some((item) => item.key === v)
+}
+
+interface Props {
+  view: ViewKey
+  onViewChange: (v: ViewKey) => void
+}
+
+/** 顶栏：品牌 + 七视图主导航（hash 路由）+ 后端状态 */
+export default function TopBar({ view, onViewChange }: Props) {
   return (
     <header className="topbar">
       <div className="brand">
@@ -18,11 +36,15 @@ export default function TopBar() {
       </div>
       <nav className="topnav" aria-label="主导航">
         {NAV_ITEMS.map((item) => (
-          <Tooltip key={item} title="功能模块建设中（FE-2 接入）">
-            <button type="button" className="topnav-item" disabled>
-              {item}
-            </button>
-          </Tooltip>
+          <button
+            key={item.key}
+            type="button"
+            className={item.key === view ? 'topnav-btn topnav-active' : 'topnav-btn'}
+            aria-current={item.key === view ? 'page' : undefined}
+            onClick={() => onViewChange(item.key)}
+          >
+            {item.label}
+          </button>
         ))}
       </nav>
       <div className="topbar-right">

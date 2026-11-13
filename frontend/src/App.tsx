@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { App as AntdApp, ConfigProvider } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
-import TopBar from './components/TopBar'
+import TopBar, { isViewKey, type ViewKey } from './components/TopBar'
 import LibraryPanel from './components/LibraryPanel'
 import ReaderPanel from './components/ReaderPanel'
 import QaPanel from './components/QaPanel'
-import TranslationPanel from './components/TranslationPanel'
+import RecommendView from './components/RecommendView'
+import GraphView from './components/GraphView'
+import WritingView from './components/WritingView'
+import HelpView from './components/HelpView'
 import PdfSmoke from './components/PdfSmoke'
 import * as api from './api'
 import type { DedupGroup, JumpRequest, PaperInfo, ParsedContract } from './types'
@@ -23,6 +26,12 @@ const theme = {
   },
 }
 
+/** 从 hash 读取当前视图：#/library #/reader #/qa #/recommend #/graph #/writing #/help */
+function currentView(): ViewKey {
+  const h = window.location.hash.replace(/^#\/?/, '')
+  return isViewKey(h) ? h : 'library'
+}
+
 function Workspace() {
   const { message } = AntdApp.useApp()
   const [papers, setPapers] = useState<PaperInfo[]>([])
@@ -33,7 +42,19 @@ function Workspace() {
   const [listError, setListError] = useState<string | null>(null)
   const [listLoading, setListLoading] = useState(true)
   const [jump, setJump] = useState<JumpRequest | null>(null)
+  const [view, setView] = useState<ViewKey>(() => currentView())
   const jumpNonce = useRef(0)
+
+  useEffect(() => {
+    const onHash = () => setView(currentView())
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [])
+
+  const switchView = useCallback((v: ViewKey) => {
+    window.location.hash = `#/${v}`
+    setView(v)
+  }, [])
 
   const refreshList = useCallback(async () => {
     setListLoading(true)
@@ -56,7 +77,7 @@ function Workspace() {
       .catch(() => undefined) // 索引状态非关键路径，失败静默
   }, [refreshList])
 
-  // 选中文献变化时加载解析契约（标题树/引用联动数据源）
+  // 选中文献变化时加载解析契约（标题树/引用联动/翻译对照数据源）
   useEffect(() => {
     if (!selectedId) {
       setParsed(null)
@@ -77,11 +98,16 @@ function Workspace() {
     }
   }, [selectedId, message])
 
-  const jumpToPaper = useCallback((paperId: string, pageNo: number) => {
-    jumpNonce.current += 1
-    setJump({ paperId, pageNo, nonce: jumpNonce.current })
-    setSelectedId((cur) => (cur === paperId ? cur : paperId))
-  }, [])
+  /** 跨视图跳页（QA 引用卡片 / 图谱节点 → 阅读器） */
+  const jumpToPaper = useCallback(
+    (paperId: string, pageNo: number) => {
+      jumpNonce.current += 1
+      setJump({ paperId, pageNo, nonce: jumpNonce.current })
+      setSelectedId((cur) => (cur === paperId ? cur : paperId))
+      switchView('reader')
+    },
+    [switchView],
+  )
 
   const handleIndexed = useCallback((paperId: string, numChunks: number) => {
     setIndexInfo((cur) => ({ ...cur, [paperId]: numChunks }))
@@ -96,37 +122,54 @@ function Workspace() {
     [refreshList],
   )
 
+  const selectedPaper = papers.find((p) => p.paper_id === selectedId) ?? null
+
   return (
     <div className="app">
-      <TopBar />
-      <div className="workspace">
-        <LibraryPanel
-          papers={papers}
-          selectedId={selectedId}
-          loading={listLoading}
-          error={listError}
-          scanGroups={scanGroups}
-          indexInfo={indexInfo}
-          onSelect={setSelectedId}
-          onChanged={refreshList}
-          onScanned={setScanGroups}
-          onIndexed={handleIndexed}
-          onDeleted={handleDeleted}
-        />
-        <ReaderPanel
-          paper={papers.find((p) => p.paper_id === selectedId) ?? null}
-          parsed={parsed}
-          jump={jump}
-          onJumpConsumed={() => setJump(null)}
-        />
-        <QaPanel
-          papers={papers}
-          selectedId={selectedId}
-          indexInfo={indexInfo}
-          onJump={jumpToPaper}
-        />
+      <TopBar view={view} onViewChange={switchView} />
+      <div className="views">
+        {view === 'library' && (
+          <div className="view view-library">
+            <LibraryPanel
+              papers={papers}
+              selectedId={selectedId}
+              loading={listLoading}
+              error={listError}
+              scanGroups={scanGroups}
+              indexInfo={indexInfo}
+              onSelect={setSelectedId}
+              onChanged={refreshList}
+              onScanned={setScanGroups}
+              onIndexed={handleIndexed}
+              onDeleted={handleDeleted}
+            />
+          </div>
+        )}
+        {view === 'reader' && (
+          <div className="view view-reader">
+            <ReaderPanel
+              paper={selectedPaper}
+              parsed={parsed}
+              jump={jump}
+              onJumpConsumed={() => setJump(null)}
+            />
+          </div>
+        )}
+        {view === 'qa' && (
+          <div className="view view-qa">
+            <QaPanel
+              papers={papers}
+              selectedId={selectedId}
+              indexInfo={indexInfo}
+              onJump={jumpToPaper}
+            />
+          </div>
+        )}
+        {view === 'recommend' && <RecommendView papers={papers} />}
+        {view === 'graph' && <GraphView papers={papers} />}
+        {view === 'writing' && <WritingView />}
+        {view === 'help' && <HelpView />}
       </div>
-      <TranslationPanel />
     </div>
   )
 }

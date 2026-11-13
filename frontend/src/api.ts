@@ -25,7 +25,6 @@ import type {
   PaperTranslateResponse,
   ParsedContract,
   QaStatusResponse,
-  Recommendation,
   ReferencesResponse,
   RefStyle,
   ReviewResponse,
