@@ -162,7 +162,7 @@ export default function LibraryPanel({
         <Alert
           type="error"
           showIcon
-          message="文献库加载失败"
+          title="文献库加载失败"
           description={error}
           action={
             <Button size="small" onClick={() => void onChanged()}>

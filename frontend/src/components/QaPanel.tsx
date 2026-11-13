@@ -83,7 +83,7 @@ export default function QaPanel({ papers, selectedId, indexInfo, onJump }: Props
               <Alert
                 type="error"
                 showIcon
-                message="提问失败"
+                title="提问失败"
                 description={turn.error}
                 className="qa-error"
               />
@@ -94,7 +94,7 @@ export default function QaPanel({ papers, selectedId, indexInfo, onJump }: Props
                   <Alert
                     type="info"
                     showIcon
-                    message="资料中未找到"
+                    title="资料中未找到"
                     description="当前文献库内容里没有足够依据回答该问题。可以换种问法，或上传更多相关论文后重建索引。"
                   />
                 ) : (
