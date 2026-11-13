@@ -1,37 +1,32 @@
 import { useEffect, useState } from 'react'
+import { BASE } from '../api'
 
-interface Health {
-  status: string
-  version: string
-}
-
-// 后端地址：默认直连本地 8000，可用 VITE_API_BASE 覆盖
-const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8000'
-
+/** 后端连通性指示（自取 /health，失败仅降级不打扰）。 */
 export default function HealthStatus() {
-  const [health, setHealth] = useState<Health | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [state, setState] = useState<'pending' | 'ok' | 'bad'>('pending')
+  const [version, setVersion] = useState('')
 
   useEffect(() => {
-    fetch(`${API_BASE}/health`)
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        return res.json()
+    let cancelled = false
+    fetch(`${BASE}/health`)
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
+      .then((data: { status?: string; version?: string }) => {
+        if (cancelled) return
+        setVersion(data.version ?? '')
+        setState(data.status === 'ok' ? 'ok' : 'bad')
       })
-      .then((data: Health) => setHealth(data))
-      .catch((e: Error) => setError(e.message))
+      .catch(() => {
+        if (!cancelled) setState('bad')
+      })
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   return (
-    <section className="health-card">
-      <h2>后端状态</h2>
-      {health && (
-        <p className="ok">
-          状态：{health.status}（版本 {health.version}）
-        </p>
-      )}
-      {error && <p className="err">无法连接后端：{error}</p>}
-      {!health && !error && <p>检测中…</p>}
-    </section>
+    <span className={`health-chip ${state}`} title={`API: ${BASE}`}>
+      <span className="health-dot" aria-hidden />
+      {state === 'pending' ? '后端检测中' : state === 'ok' ? `后端已连接 ${version && `v${version}`}` : '后端未连接'}
+    </span>
   )
 }

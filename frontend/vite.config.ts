@@ -7,10 +7,20 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
+      // 后端路由自带 /api 前缀，不作 rewrite
       '/api': {
         target: 'http://localhost:8000',
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, ''),
+      },
+      '/health': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+      // DEV 冒烟：testdata 静态服务（python -m http.server 8099 --directory testdata）
+      '/smoke-pdf': {
+        target: 'http://localhost:8099',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/smoke-pdf/, ''),
       },
     },
   },
