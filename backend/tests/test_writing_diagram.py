@@ -40,7 +40,9 @@ def test_diagram_kinds_return_valid_code(kind, code):
     """LLM 围栏输出被剥离，返回裸代码 + 非空 usage_hint。"""
     chat = StubChat(reply=FENCE + kind + "\n" + code + "\n" + FENCE)
     client = make_client(chat)
-    resp = client.post("/api/writing/diagram", json={"kind": kind, "description": "编码器-解码器架构"})
+    resp = client.post(
+        "/api/writing/diagram", json={"kind": kind, "description": "编码器-解码器架构"}
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert data["kind"] == kind

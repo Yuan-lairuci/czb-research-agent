@@ -267,7 +267,9 @@ class ReferencesEngine:
         self._s2 = s2 if s2 is not None else S2Client()
         self._arxiv = arxiv if arxiv is not None else ArxivClient()
         self._parsed_dir = (
-            Path(parsed_dir) if parsed_dir is not None else Path(__file__).resolve().parents[2] / "data" / "parsed"
+            Path(parsed_dir)
+            if parsed_dir is not None
+            else Path(__file__).resolve().parents[2] / "data" / "parsed"
         )
         self._source_limit = source_limit
 
@@ -346,7 +348,8 @@ class ReferencesEngine:
             "只输出 JSON 数组本身，不要任何解释或 Markdown 围栏。"
         )
         who = f"主题：{topic}" if topic else f"论文：{', '.join(paper_ids or [])}"
-        user = f"{who}\n风格：{style}\n候选清单（唯一合法来源）：\n{json.dumps(listing, ensure_ascii=False)}"
+        catalog = json.dumps(listing, ensure_ascii=False)
+        user = f"{who}\n风格：{style}\n候选清单（唯一合法来源）：\n{catalog}"
         return [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
@@ -367,7 +370,8 @@ class ReferencesEngine:
         except (ChatServiceError, OSError):
             return None
         try:
-            parsed = json.loads(_FENCE_RE.search(raw).group(1) if _FENCE_RE.search(raw) else raw.strip())
+            match = _FENCE_RE.search(raw)
+            parsed = json.loads(match.group(1) if match else raw.strip())
         except (json.JSONDecodeError, AttributeError):
             return None
         if not isinstance(parsed, list):

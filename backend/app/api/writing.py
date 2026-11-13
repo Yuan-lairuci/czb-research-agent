@@ -25,7 +25,11 @@ from app.services.translate_llm import TranslateEngine
 from app.services.writing_chart import ChartEngine, ChartError
 from app.services.writing_diagram import DiagramEngine, DiagramError
 from app.services.writing_outline import OutlineEngine, OutlineError
-from app.services.writing_references import ReferencesEngine, ReferencesError, SourcesUnavailableError
+from app.services.writing_references import (
+    ReferencesEngine,
+    ReferencesError,
+    SourcesUnavailableError,
+)
 
 router = APIRouter(prefix="/api/writing", tags=["writing"])
 
