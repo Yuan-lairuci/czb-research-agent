@@ -121,6 +121,27 @@ export default function ReaderPanel({ paper, parsed, jump, onJumpConsumed, onSel
     }
   }, [paper])
 
+  /** 文本层按 canvas 实际显示尺寸等比缩放（.pdf-canvas 的 max-width 会 CSS 缩小画布）。 */
+  const syncLayer = useCallback((vw: number, vh: number) => {
+    const canvas = canvasRef.current
+    const layer = layerRef.current
+    if (!canvas || !layer || vw <= 0) return
+    const k = canvas.clientWidth / vw
+    layer.style.width = vw + 'px'
+    layer.style.height = vh + 'px'
+    layer.style.transform = 'scale(' + k + ')'
+  }, [])
+
+  // 窗口尺寸变化后重新同步文本层缩放
+  useEffect(() => {
+    const onResize = () => {
+      const canvas = canvasRef.current
+      if (canvas && mode === 'pdf') syncLayer(canvas.width, canvas.height)
+    }
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [mode, syncLayer])
+
   // 渲染当前页（canvas + 可选文本层）
   useEffect(() => {
     if (!pdfDoc || mode !== 'pdf') return
@@ -134,6 +155,7 @@ export default function ReaderPanel({ paper, parsed, jump, onJumpConsumed, onSel
         layerRef.current.innerHTML = ''
         const viewport = page.getViewport({ scale })
         const ok = await pdf.renderTextLayer(page, layerRef.current, viewport)
+        syncLayer(viewport.width, viewport.height)
         if (ok && !cancelled) wrapLayerCitations(layerRef.current, focusReference)
       })
       .catch(() => undefined)
@@ -307,8 +329,10 @@ export default function ReaderPanel({ paper, parsed, jump, onJumpConsumed, onSel
           )}
           {!pdfLoading && mode === 'pdf' && (
             <div className="pdf-page" key={`page-${currentPage}-${scale}`}>
-              <canvas ref={canvasRef} className="pdf-canvas" />
-              <div ref={layerRef} className="textLayer" />
+              <div className="pdf-canvas-wrap">
+                <canvas ref={canvasRef} className="pdf-canvas" />
+                <div ref={layerRef} className="textLayer" />
+              </div>
               {flashNonce > 0 && <div key={flashNonce} className="page-flash" />}
             </div>
           )}
