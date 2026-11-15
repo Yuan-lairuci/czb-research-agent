@@ -8,7 +8,7 @@ export default function HealthStatus() {
 
   useEffect(() => {
     let cancelled = false
-    fetch(`${BASE}/health`)
+    fetch(`${BASE}/health`, { cache: 'no-store' })
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
       .then((data: { status?: string; version?: string }) => {
         if (cancelled) return

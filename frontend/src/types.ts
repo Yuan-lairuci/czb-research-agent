@@ -39,6 +39,30 @@ export interface DedupScanResponse {
   groups: DedupGroup[]
 }
 
+/** POST /api/library/dedup/version-diff */
+export interface SectionChange {
+  name: string
+  /** added | removed | modified | unchanged */
+  status: string
+  old_chars: number
+  new_chars: number
+}
+
+export interface VersionDiffRequest {
+  paper_id_a: string
+  paper_id_b: string
+}
+
+export interface VersionDiffResponse {
+  older_id: string
+  newer_id: string
+  older_title: string
+  newer_title: string
+  version_evidence: string
+  sections: SectionChange[]
+  llm_summary: string
+}
+
 /** GET /api/library/papers/{id}/parsed → 解析契约 JSON */
 export interface ParsedBlock {
   type: 'text' | 'heading' | 'table' | 'formula' | 'figure'
@@ -85,6 +109,8 @@ export interface AskRequest {
   question: string
   paper_ids?: string[]
   top_k?: number
+  /** 同会话此前问答历史（多轮追问记忆） */
+  history?: { question: string; answer: string }[]
 }
 
 export interface SourceOut {

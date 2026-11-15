@@ -33,12 +33,14 @@ import type {
   TrackListResponse,
   TrackRunResponse,
   TranslateDirection,
+  VersionDiffRequest,
+  VersionDiffResponse,
   TranslateResponse,
   Zh2EnResponse,
 } from './types'
 
 // 后端地址：默认直连本地 8000，可用 VITE_API_BASE 覆盖
-export const BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
+export const BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8000'
 
 /** 本会话内上传过的 PDF 原件（服务端暂无文件下载接口时供阅读器渲染）。 */
 export const localPdfCache = new Map<string, File>()
@@ -90,6 +92,15 @@ export function dedupScan(): Promise<DedupScanResponse> {
   return request<DedupScanResponse>('/api/library/dedup/scan', { method: 'POST' })
 }
 
+/** 同工作版本差异：章节级对比 + LLM 版本差异总结。 */
+export function versionDiff(req: VersionDiffRequest): Promise<VersionDiffResponse> {
+  return request<VersionDiffResponse>('/api/library/dedup/version-diff', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+}
+
 export function indexPaper(paperId: string): Promise<IndexResponse> {
   return request<IndexResponse>('/api/qa/index', {
     method: 'POST',
@@ -108,6 +119,63 @@ export function askQa(req: AskRequest): Promise<AskResponse> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(req),
   })
+}
+
+/**
+ * SSE 流式问答：data: {"delta","done"[,"answer","sources","verified","error"]}。
+ * 每帧回调 onDelta（增量正文），返回最终 AskResponse（含溯源）。
+ */
+export async function askQaStream(
+  req: AskRequest,
+  onDelta: (delta: string, full: string) => void,
+): Promise<AskResponse> {
+  const res = await fetch(`${BASE}/api/qa/ask/stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+    body: JSON.stringify(req),
+  })
+  if (!res.ok) throw await parseError(res)
+  const reader = res.body?.getReader()
+  if (!reader) throw new ApiError(0, '流式响应不可用')
+  const decoder = new TextDecoder('utf-8')
+  let buffer = ''
+  let full = ''
+  let final: AskResponse | null = null
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const frames = buffer.split('\n\n')
+    buffer = frames.pop() ?? ''
+    for (const frame of frames) {
+      for (const line of frame.split('\n')) {
+        if (!line.startsWith('data: ')) continue
+        try {
+          const obj = JSON.parse(line.slice(6).trim()) as {
+            delta?: string
+            done?: boolean
+            answer?: string
+            sources?: AskResponse['sources']
+            verified?: boolean
+            error?: string
+          }
+          if (typeof obj.error === 'string' && obj.error) throw new ApiError(502, obj.error)
+          if (typeof obj.delta === 'string' && obj.delta) {
+            full += obj.delta
+            onDelta(obj.delta, full)
+          }
+          if (obj.done && typeof obj.answer === 'string') {
+            final = { answer: obj.answer, sources: obj.sources ?? [], verified: obj.verified ?? true }
+          }
+        } catch (e) {
+          if (e instanceof ApiError) throw e
+          /* 忽略无法解析的帧 */
+        }
+      }
+    }
+  }
+  if (!final) throw new ApiError(502, '流式响应异常：未收到结束帧')
+  return final
 }
 
 /**
