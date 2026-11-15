@@ -18,7 +18,7 @@ import re
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
@@ -206,6 +206,34 @@ class DedupScanResponse(BaseModel):
     groups: list[DedupGroup]
 
 
+class VersionDiffRequest(BaseModel):
+    """版本差异请求：同工作的两个 paper_id。"""
+
+    paper_id_a: str
+    paper_id_b: str
+
+
+class SectionChange(BaseModel):
+    """章节级差异条目。status ∈ added | removed | modified | unchanged"""
+
+    name: str
+    status: str
+    old_chars: int
+    new_chars: int
+
+
+class VersionDiffResponse(BaseModel):
+    """版本差异响应：新旧判定 + 章节差异 + LLM 版本差异总结。"""
+
+    older_id: str
+    newer_id: str
+    older_title: str
+    newer_title: str
+    version_evidence: str
+    sections: list[SectionChange]
+    llm_summary: str
+
+
 class OcrResult(BaseModel):
     """OCR 结果（引擎缺失时 needs_ocr=True, engine="none"）。"""
 
@@ -255,7 +283,7 @@ class PaperDB:
     @staticmethod
     def now_iso() -> str:
         """当前 UTC 时间（ISO 格式）。"""
-        return datetime.now(UTC).isoformat()
+        return datetime.now(timezone.utc).isoformat()
 
     def insert(self, record: dict[str, Any]) -> None:
         """插入一条文献记录。"""

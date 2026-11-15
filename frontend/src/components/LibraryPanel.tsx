@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react'
-import { Alert, Badge, Button, Empty, Popconfirm, Spin, Tag, Tooltip, Upload } from 'antd'
+import { Alert, Badge, Button, Empty, Modal, Popconfirm, Spin, Tag, Tooltip, Upload } from 'antd'
 import { App as AntdApp } from 'antd'
 import * as api from '../api'
-import type { DedupGroup, PaperInfo } from '../types'
+import type { DedupGroup, PaperInfo, VersionDiffResponse } from '../types'
 
 interface Props {
   papers: PaperInfo[]
@@ -30,6 +30,13 @@ function formatTime(iso: string): string {
   return iso.replace('T', ' ').slice(0, 16)
 }
 
+function vdStatusLabel(status: string): string {
+  if (status === 'added') return '新增'
+  if (status === 'removed') return '删除'
+  if (status === 'modified') return '修改'
+  return '未变'
+}
+
 function versionFromFilename(name: string, fallback: string): string {
   const m = name.match(/v(\d+)\.pdf$/i)
   return m ? `v${m[1]}` : fallback.slice(0, 6)
@@ -54,6 +61,44 @@ export default function LibraryPanel({
   const [uploading, setUploading] = useState(0)
   const [scanning, setScanning] = useState(false)
   const [indexing, setIndexing] = useState<Set<string>>(new Set())
+  const [vdOpen, setVdOpen] = useState(false)
+  const [vdLoading, setVdLoading] = useState(false)
+  const [vdData, setVdData] = useState<VersionDiffResponse | null>(null)
+
+  const openVersionDiff = async (paper: PaperInfo) => {
+    const group = scanGroups.find((g) => g.paper_ids.includes(paper.paper_id))
+    let otherId = group && group.paper_ids.find((id) => id !== paper.paper_id)
+    if (!otherId && paper.dedup_group) {
+      // 刷新页面后 scanGroups 丢失：用持久化的 dedup_group 找同组另一篇
+      otherId = papers.find((p) => p.dedup_group === paper.dedup_group && p.paper_id !== paper.paper_id)
+        ?.paper_id
+    }
+    if (!otherId) return
+    setVdOpen(true)
+    setVdLoading(true)
+    setVdData(null)
+    try {
+      const data = await api.versionDiff({ paper_id_a: paper.paper_id, paper_id_b: otherId })
+      setVdData(data)
+    } catch (e) {
+      message.error('版本差异获取失败：' + (e instanceof Error ? e.message : '未知错误'))
+      setVdOpen(false)
+    } finally {
+      setVdLoading(false)
+    }
+  }
+
+  const overwriteOlder = async () => {
+    if (!vdData) return
+    try {
+      await api.deletePaper(vdData.older_id)
+      message.success('已覆盖：仅保留新版 ' + vdData.newer_id)
+      setVdOpen(false)
+      await onChanged()
+    } catch (e) {
+      message.error('覆盖失败：' + (e instanceof Error ? e.message : '未知错误'))
+    }
+  }
 
   const dedupMap = useMemo(() => {
     const map = new Map<string, DedupBadge>()
@@ -245,6 +290,11 @@ export default function LibraryPanel({
                 <Button size="small" loading={indexing.has(paper.paper_id)} onClick={() => void runIndex(paper)}>
                   {chunks !== undefined ? '重建索引' : '建索引'}
                 </Button>
+                {(badge || persistedGroup) && (
+                  <Button size="small" onClick={() => void openVersionDiff(paper)}>
+                    版本差异
+                  </Button>
+                )}
                 <Popconfirm
                   title="删除这篇文献？"
                   description="将同时删除文件与解析结果"
@@ -261,6 +311,59 @@ export default function LibraryPanel({
           )
         })}
       </div>
+
+      <Modal
+        open={vdOpen}
+        title="版本差异 · 同工作多版本"
+        width={680}
+        onCancel={() => setVdOpen(false)}
+        footer={[
+          <Button key="keep" onClick={() => setVdOpen(false)}>
+            保留全部
+          </Button>,
+          <Popconfirm
+            key="overwrite"
+            title="删除旧版，仅保留新版？"
+            description={vdData ? '将删除旧版 ' + vdData.older_id : ''}
+            okText="覆盖"
+            cancelText="取消"
+            onConfirm={() => void overwriteOlder()}
+          >
+            <Button danger disabled={!vdData}>
+              覆盖（仅保留新版）
+            </Button>
+          </Popconfirm>,
+        ]}
+      >
+        {vdLoading && <Spin />}
+        {vdData && (
+          <div className="version-diff-body">
+            <p>
+              <b>版本判定：</b>
+              {vdData.version_evidence}
+            </p>
+            <p>
+              旧版 {vdData.older_title}（{vdData.older_id}） → 新版 {vdData.newer_title}（
+              {vdData.newer_id}）
+            </p>
+            <div
+              className="vd-summary"
+              style={{ whiteSpace: 'pre-wrap', background: '#f6f8fa', padding: 12, borderRadius: 8 }}
+            >
+              {vdData.llm_summary}
+            </div>
+            <ul className="vd-sections">
+              {vdData.sections
+                .filter((s) => s.status !== 'unchanged')
+                .map((s) => (
+                  <li key={s.name}>
+                    [{vdStatusLabel(s.status)}] {s.name}（{s.old_chars} → {s.new_chars} 字符）
+                  </li>
+                ))}
+            </ul>
+          </div>
+        )}
+      </Modal>
     </aside>
   )
 }

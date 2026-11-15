@@ -19,9 +19,12 @@ from app.models.paper_models import (
     PaperDB,
     PaperInfo,
     PaperListResponse,
+    SectionChange,
+    VersionDiffRequest,
+    VersionDiffResponse,
 )
 from app.services import ocr as ocr_service
-from app.services import pdf_dedup, pdf_parse
+from app.services import pdf_dedup, pdf_parse, version_diff
 
 _DEFAULT_DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 _UPLOAD_CHUNK = 1024 * 1024
@@ -161,6 +164,33 @@ def create_library_router(data_dir: Path | str | None = None) -> APIRouter:
             for pid in group["paper_ids"]:
                 db.set_dedup_group(pid, gid)
         return DedupScanResponse(groups=groups)
+
+    @router.post("/dedup/version-diff", response_model=VersionDiffResponse)
+    async def dedup_version_diff(req: VersionDiffRequest) -> VersionDiffResponse:
+        contracts: list[dict[str, Any]] = []
+        for pid in (req.paper_id_a, req.paper_id_b):
+            _require_row(pid)
+            contract = pdf_parse.load_parsed(parsed_dir, pid)
+            if contract is None:
+                raise HTTPException(
+                    status_code=404, detail=f"parsed contract for {pid} not found"
+                )
+            contracts.append(contract)
+        older, newer, evidence = version_diff.decide_older_newer(contracts[0], contracts[1])
+        changes = version_diff.diff_contracts(older, newer)
+        try:
+            summary = await version_diff.summarize_version_diff(older, newer, changes, evidence)
+        except Exception as exc:  # noqa: BLE001 - LLM 不可用时降级为纯结构差异
+            summary = f"（LLM 摘要暂不可用：{exc}）"
+        return VersionDiffResponse(
+            older_id=older["paper_id"],
+            newer_id=newer["paper_id"],
+            older_title=older.get("title", ""),
+            newer_title=newer.get("title", ""),
+            version_evidence=evidence,
+            sections=[SectionChange(**c) for c in changes],
+            llm_summary=summary,
+        )
 
     @router.get("/papers/{paper_id}/ocr", response_model=OcrResult)
     async def ocr_paper_page(
