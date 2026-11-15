@@ -6,8 +6,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
+import re
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -29,6 +31,24 @@ DIRECTION_INSTRUCTION: dict[str, str] = {
     "zh2en": "将下面的中文翻译成英文。",
     "en2zh": "将下面的英文翻译成中文。",
 }
+
+# 纯数字/符号块（页码、编号等）：无字母无汉字，译了也是胡话，直接原样返回
+_TRIVIAL_RE = re.compile(r"^[^A-Za-z\u4e00-\u9fff]+$")
+_PLACEHOLDER_RE = re.compile(r"\{\{\w+\}\}")
+# LLM 元抱怨（答非所问）识别：命中则视同失败回退原文，绝不写缓存
+_META_MARKERS = ("请提供需要翻译", "我会按你的要求")
+
+
+def _needs_llm(src: str) -> bool:
+    """块是否值得送 LLM：纯数字符号、单 token 碎片（<pad>/missing 等解析垃圾）、
+    掩码后无可译文字的公式块一律跳过，原样返回。"""
+    s = src.strip()
+    if not s or _TRIVIAL_RE.match(s):
+        return False
+    if " " not in s and "\n" not in s and not re.search(r"[\u4e00-\u9fff]", s):
+        return False
+    masked, _ = mask(s)
+    return bool(re.search(r"[A-Za-z\u4e00-\u9fff]", _PLACEHOLDER_RE.sub("", masked)))
 
 
 def default_parsed_dir() -> Path:
@@ -91,6 +111,8 @@ class TranslateEngine:
         masked, mapping = mask(text)
         raw = await self._chat.chat(build_messages(masked, direction))
         translated = unmask(raw, mapping)
+        if any(m in translated for m in _META_MARKERS):
+            return text, "fallback"
         self._store.put_text(self.model_name, direction, text, translated)
         return translated, self.model_name
 
@@ -140,19 +162,28 @@ class TranslateEngine:
     async def translate_page(
         self, paper_id: str, page_no: int, direction: Direction
     ) -> list[dict]:
-        """按解析契约逐块对齐翻译一页；空文本块不触达 LLM。
+        """按解析契约逐块对齐翻译一页；空文本块与纯数字/符号块不触达 LLM，页内块并发翻译。
 
         返回 [{block_index, src_text, dst_text}]，同时写 page_cache 进度。
         """
         paper = self._load_paper(paper_id)
         page = self._get_page(paper, page_no)
-        result: list[dict] = []
-        for index, block in enumerate(page.get("blocks", [])):
-            src = block.get("text", "") or ""
-            dst = (await self.translate_text(src, direction))[0] if src.strip() else ""
+
+        async def _one(index: int, src: str) -> dict:
+            if not src.strip():
+                dst = ""
+            elif not _needs_llm(src):
+                dst = src.strip()
+            else:
+                dst = (await self.translate_text(src, direction))[0]
             self._store.save_page_block(paper_id, direction, page_no, index, src, dst)
-            result.append({"block_index": index, "src_text": src, "dst_text": dst})
-        return result
+            return {"block_index": index, "src_text": src, "dst_text": dst}
+
+        blocks = page.get("blocks", [])
+        results = await asyncio.gather(
+            *(_one(i, b.get("text", "") or "") for i, b in enumerate(blocks))
+        )
+        return list(results)
 
     async def translate_paper(
         self, paper_id: str, direction: Direction, fill: bool = True

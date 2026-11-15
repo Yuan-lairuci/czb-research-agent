@@ -25,7 +25,7 @@ from __future__ import annotations
 import hashlib
 import os
 import sqlite3
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -98,7 +98,7 @@ class TranslateStore:
     def put_text(self, model: str, direction: str, src_text: str, translated: str) -> None:
         """写入（或覆盖）整段文本翻译缓存。"""
         key = text_cache_key(model, direction, src_text)
-        now = datetime.now(UTC).isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         with self._connect() as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO text_cache"
