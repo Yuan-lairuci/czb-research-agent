@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
@@ -67,6 +68,7 @@ class NumpyVectorStore(VectorStore):
         self.index_dir = Path(index_dir) if index_dir else default_index_dir()
         self._chunks: list[dict[str, Any]] = []
         self._matrix: np.ndarray | None = None
+        self._lock = threading.RLock()
         self._load()
 
     def add(self, chunks: list[dict[str, Any]], vectors: list[list[float]]) -> None:
@@ -84,8 +86,9 @@ class NumpyVectorStore(VectorStore):
         norms = np.linalg.norm(arr, axis=1, keepdims=True)
         norms[norms == 0] = 1.0
         arr = arr / norms
-        self._chunks.extend(dict(c) for c in chunks)
-        self._matrix = arr if self._matrix is None else np.vstack([self._matrix, arr])
+        with self._lock:
+            self._chunks.extend(dict(c) for c in chunks)
+            self._matrix = arr if self._matrix is None else np.vstack([self._matrix, arr])
 
     def query(
         self, vector: list[float], top_k: int = 5, paper_ids: list[str] | None = None
@@ -113,8 +116,9 @@ class NumpyVectorStore(VectorStore):
         keep = [i for i, c in enumerate(self._chunks) if c["paper_id"] != paper_id]
         if len(keep) == len(self._chunks):
             return
-        self._chunks = [self._chunks[i] for i in keep]
-        self._matrix = self._matrix[keep] if (keep and self._matrix is not None) else None
+        with self._lock:
+            self._chunks = [self._chunks[i] for i in keep]
+            self._matrix = self._matrix[keep] if (keep and self._matrix is not None) else None
 
     def papers(self) -> dict[str, int]:
         counts: dict[str, int] = {}
@@ -123,21 +127,32 @@ class NumpyVectorStore(VectorStore):
         return counts
 
     def save(self) -> None:
-        self.index_dir.mkdir(parents=True, exist_ok=True)
-        meta_path = self.index_dir / META_FILE
-        vec_path = self.index_dir / VECTORS_FILE
-        meta_tmp = meta_path.with_suffix(".json.tmp")
-        # numpy 会给不以 .npz 结尾的文件名自动追加 .npz，临时名必须以 .npz 结尾
-        vec_tmp = self.index_dir / "index_vectors_tmp.npz"
-        meta_tmp.write_text(
-            json.dumps({"chunks": self._chunks}, ensure_ascii=False), encoding="utf-8"
-        )
-        vectors = (
-            self._matrix if self._matrix is not None else np.empty((0, 0), dtype=np.float64)
-        )
-        np.savez_compressed(vec_tmp, vectors=vectors)
-        os.replace(meta_tmp, meta_path)
-        os.replace(vec_tmp, vec_path)
+        with self._lock:
+            if self._matrix is not None and self._matrix.shape[0] != len(self._chunks):
+                raise VectorStoreError(
+                    f"chunks({len(self._chunks)}) 与 vectors({self._matrix.shape[0]}) 数量不一致，拒绝写盘"
+                )
+            self.index_dir.mkdir(parents=True, exist_ok=True)
+            meta_path = self.index_dir / META_FILE
+            vec_path = self.index_dir / VECTORS_FILE
+            # 唯一临时名：并发保存互不踩踏（旧版固定名 index.json.tmp 是竞态根源）
+            token = f"{os.getpid()}-{threading.get_ident()}"
+            meta_tmp = self.index_dir / f"index_{token}.json.tmp"
+            # numpy 会给不以 .npz 结尾的文件名自动追加 .npz，临时名必须以 .npz 结尾
+            vec_tmp = self.index_dir / f"index_vectors_{token}.npz"
+            try:
+                meta_tmp.write_text(
+                    json.dumps({"chunks": self._chunks}, ensure_ascii=False), encoding="utf-8"
+                )
+                vectors = (
+                    self._matrix if self._matrix is not None else np.empty((0, 0), dtype=np.float64)
+                )
+                np.savez_compressed(vec_tmp, vectors=vectors)
+                os.replace(meta_tmp, meta_path)
+                os.replace(vec_tmp, vec_path)
+            finally:
+                meta_tmp.unlink(missing_ok=True)
+                vec_tmp.unlink(missing_ok=True)
 
     def _load(self) -> None:
         meta_path = self.index_dir / META_FILE

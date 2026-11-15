@@ -16,7 +16,7 @@ import re
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -164,7 +164,7 @@ class FeedbackStore:
             conn.execute(
                 "INSERT INTO feedback (paper_key, s2_id, arxiv_id, is_like, created_at)"
                 " VALUES (?, ?, ?, ?, ?)",
-                (key, s2_id, arxiv_id, 1 if like else 0, datetime.now(UTC).isoformat()),
+                (key, s2_id, arxiv_id, 1 if like else 0, datetime.now(timezone.utc).isoformat()),
             )
         return FeedbackResponse(stored=True, paper_key=key)
 
@@ -207,7 +207,7 @@ def score_entry(
 
     year = payload.get("year")
     if year:
-        current = now_year if now_year is not None else datetime.now(UTC).year
+        current = now_year if now_year is not None else datetime.now(timezone.utc).year
         recency = RECENCY_WEIGHT * max(0.0, 1 - (current - int(year)) / RECENCY_DECAY_YEARS)
         if recency > 0:
             score += recency

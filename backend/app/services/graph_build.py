@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -178,7 +178,7 @@ def build_graph(
     graph_id = hashlib.sha256(",".join(sorted(contracts)).encode()).hexdigest()[:12]
     graph = CitationGraph(
         graph_id=graph_id,
-        created_at=datetime.now(UTC).isoformat(),
+        created_at=datetime.now(timezone.utc).isoformat(),
         nodes=[corpus[pid] for pid in sorted(corpus)],
         edges=edges,
     )

@@ -12,7 +12,7 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -56,7 +56,7 @@ class TrackStore:
 
     @staticmethod
     def _now() -> str:
-        return datetime.now(UTC).isoformat()
+        return datetime.now(timezone.utc).isoformat()
 
     def upsert(self, item: dict[str, Any]) -> None:
         """插入或覆盖一条追踪记录。"""

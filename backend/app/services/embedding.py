@@ -63,7 +63,7 @@ class OpenAICompatibleEmbedding(EmbeddingBackend):
         base_url: str | None = None,
         api_key: str | None = None,
         model: str | None = None,
-        timeout: float = 30.0,
+        timeout: float = 120.0,
     ) -> None:
         self.base_url = (
             base_url
@@ -83,8 +83,8 @@ class OpenAICompatibleEmbedding(EmbeddingBackend):
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
         vectors: list[list[float]] = []
-        for start in range(0, len(texts), 64):
-            batch = texts[start : start + 64]
+        for start in range(0, len(texts), 16):
+            batch = texts[start : start + 16]
             payload = {"model": self.model, "input": batch}
             try:
                 with httpx.Client(timeout=self.timeout) as client:
