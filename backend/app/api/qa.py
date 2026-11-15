@@ -4,7 +4,10 @@
 """
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 
 from app.models.qa_models import (
     AskRequest,
@@ -63,12 +66,56 @@ def status() -> StatusResponse:
     return StatusResponse(papers=info["papers"], total_chunks=info["total_chunks"])
 
 
+def _sse_frame(payload: dict) -> str:
+    """SSE 帧：data: {json}\n\n（ensure_ascii=False 便于中文阅读）。"""
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+@router.post("/ask/stream")
+async def ask_stream(req: AskRequest) -> StreamingResponse:
+    """Token 级流式问答：delta 增量帧 + 收尾 done 帧（全量 answer + sources + verified）。"""
+
+    async def gen():
+        try:
+            async for ev in get_engine().ask_stream(
+                question=req.question,
+                paper_ids=req.paper_ids,
+                top_k=req.top_k,
+                history=[{"question": t.question, "answer": t.answer} for t in req.history],
+            ):
+                if ev["type"] == "delta":
+                    yield _sse_frame({"delta": ev["delta"], "done": False})
+                else:
+                    yield _sse_frame(
+                        {
+                            "delta": "",
+                            "done": True,
+                            "answer": ev["answer"],
+                            "sources": [s.model_dump() for s in ev["sources"]],
+                            "verified": ev["verified"],
+                        }
+                    )
+        except RagError as exc:
+            yield _sse_frame({"delta": "", "done": True, "error": str(exc)})
+        except ChatServiceError as exc:
+            yield _sse_frame({"delta": "", "done": True, "error": f"生成服务不可用: {exc}"})
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @router.post("/ask", response_model=AskResponse)
 async def ask(req: AskRequest) -> AskResponse:
     """带原文溯源的 RAG 问答（支持单篇与跨文对比）。"""
     try:
         return await get_engine().ask(
-            question=req.question, paper_ids=req.paper_ids, top_k=req.top_k
+            question=req.question,
+            paper_ids=req.paper_ids,
+            top_k=req.top_k,
+            history=[{"question": t.question, "answer": t.answer} for t in req.history],
         )
     except RagError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

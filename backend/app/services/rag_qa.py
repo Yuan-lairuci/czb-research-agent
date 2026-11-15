@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -41,7 +42,10 @@ def default_parsed_dir() -> Path:
 
 
 def _build_prompt(
-    question: str, chunks: list[dict[str, Any]], multi_paper: bool
+    question: str,
+    chunks: list[dict[str, Any]],
+    multi_paper: bool,
+    history: list[dict[str, str]] | None = None,
 ) -> str:
     """按 [S1][S2] 编号构造提示词，强制锚点标注与逐字引文。"""
     lines = ["你是一个严格基于给定资料回答的学术问答助手。请根据以下资料回答问题。", "", "资料："]
@@ -64,6 +68,20 @@ def _build_prompt(
     )
     if multi_paper:
         lines.append("5. 涉及多篇论文时逐点对比，并分别标注每一点的来源。")
+    if history:
+        import re as _re
+
+        lines.append("对话历史（用于理解指代与追问，不要重复回答）：")
+        for t in history:
+            clean = _re.sub(r"\[\d+\]", "", t["answer"]).strip()  # 去掉旧编号，避免与本轮资料编号冲突
+            lines.append(f"问：{t['question']}")
+            lines.append(f"答：{clean}")
+        lines.append("")
+        lines.append(
+            "注意：最后一个问题可能是对对话历史的追问，其中的“它/其/该/这个”等指代"
+            "应先依据对话历史还原为具体对象（如某模型、某论文），然后在资料中查找该对象的"
+            "相关事实作答；只要资料中有相关内容，必须作答，不要因问题简短而拒答。"
+        )
     lines.append("")
     lines.append(f"问题：{question}")
     return "\n".join(lines)
@@ -83,6 +101,56 @@ def _parse_answer(raw: str) -> tuple[str, dict[int, str]]:
     return answer.strip(), quote_map
 
 
+def _verify_sources(
+    answer: str,
+    quote_map: dict[int, str],
+    chunks: list[dict[str, Any]],
+    hits: list[dict[str, Any]],
+) -> tuple[list[SourceOut], bool]:
+    """引文逐字后校验：answer 里的 [S#] → 来源条目；quote 与 chunk text 严格子串匹配。"""
+    cited: list[int] = []
+    for m in _CITE_RE.finditer(answer):
+        idx = int(m.group(1))
+        if idx not in cited:
+            cited.append(idx)
+
+    if not cited:
+        return [], (REFUSAL_TEXT in answer)
+
+    sources: list[SourceOut] = []
+    all_ok = True
+    for idx in cited:
+        if 1 <= idx <= len(chunks):
+            chunk = chunks[idx - 1]
+            quote = quote_map.get(idx, "")
+            ok = bool(quote) and quote in chunk["text"]
+            if not ok:
+                all_ok = False
+            sources.append(
+                SourceOut(
+                    chunk_id=chunk["chunk_id"],
+                    paper_id=chunk["paper_id"],
+                    page_no=chunk["page_no"],
+                    quote=quote,
+                    score=float(hits[idx - 1]["score"]),
+                    verified=ok,
+                )
+            )
+        else:
+            all_ok = False
+            sources.append(
+                SourceOut(
+                    chunk_id=f"S{idx}",
+                    paper_id="",
+                    page_no=0,
+                    quote=quote_map.get(idx, ""),
+                    score=0.0,
+                    verified=False,
+                )
+            )
+    return sources, all_ok
+
+
 class RagQAEngine:
     """检索式问答引擎：chunk → embed → store；ask 检索 + 生成 + 后校验。"""
 
@@ -97,18 +165,20 @@ class RagQAEngine:
         self.embedder = embedder if embedder is not None else get_embedding_backend()
         self.chat = chat if chat is not None else ChatService()
         self.parsed_dir = Path(parsed_dir) if parsed_dir else default_parsed_dir()
+        self._index_lock = threading.Lock()
 
     def index_paper(self, paper_id: str) -> dict[str, int]:
         """读 parsed/{paper_id}.json → chunk → embed → 落库；返回 {num_chunks, num_pages}。"""
-        path = self.parsed_dir / f"{paper_id}.json"
-        if not path.is_file():
-            raise ParsedPaperNotFoundError(f"未找到已解析论文: {path}")
-        paper = json.loads(path.read_text(encoding="utf-8"))
-        chunks = chunk_paper(paper)
-        vectors = self.embedder.embed([c["text"] for c in chunks])
-        self.store.remove_paper(paper_id)
-        self.store.add(chunks, vectors)
-        self.store.save()
+        with self._index_lock:
+            path = self.parsed_dir / f"{paper_id}.json"
+            if not path.is_file():
+                raise ParsedPaperNotFoundError(f"未找到已解析论文: {path}")
+            paper = json.loads(path.read_text(encoding="utf-8"))
+            chunks = chunk_paper(paper)
+            vectors = self.embedder.embed([c["text"] for c in chunks])
+            self.store.remove_paper(paper_id)
+            self.store.add(chunks, vectors)
+            self.store.save()
         return {"num_chunks": len(chunks), "num_pages": len(paper.get("pages", []))}
 
     def status(self) -> dict[str, Any]:
@@ -116,11 +186,36 @@ class RagQAEngine:
         papers = self.store.papers()
         return {"papers": papers, "total_chunks": sum(papers.values())}
 
+    def _retrieve(
+        self,
+        question: str,
+        top_k: int,
+        history: list[dict[str, str]],
+        paper_ids: list[str] | None,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """多轮检索：本问 + 「上一问+本问」组合查询各检一路再合并——
+        组合查询补上指代实体("它"→Llama 2)，加宽与不截断保证追问命中不被上一轮高分块挤掉。
+        """
+        embed_texts = [question]
+        if history:
+            embed_texts.append(history[-1]["question"] + " " + question)
+        vecs = self.embedder.embed(embed_texts)
+        width = top_k * 2 if history else top_k
+        merged: dict[str, dict[str, Any]] = {}
+        for v in vecs:
+            for h in self.store.query(v, top_k=width, paper_ids=paper_ids):
+                cid = h["chunk"]["chunk_id"]
+                if cid not in merged or h["score"] > merged[cid]["score"]:
+                    merged[cid] = h
+        hits = sorted(merged.values(), key=lambda h: h["score"], reverse=True)
+        return [h["chunk"] for h in hits], hits
+
     async def ask(
         self,
         question: str,
         paper_ids: list[str] | None = None,
         top_k: int = 5,
+        history: list[dict[str, str]] | None = None,
     ) -> AskResponse:
         """检索 top_k → 生成带 [S#] 锚点回答 → 引文逐字后校验。"""
         question = question.strip()
@@ -128,15 +223,12 @@ class RagQAEngine:
             raise RagError("question 不能为空")
         if top_k <= 0:
             raise RagError("top_k 必须为正整数")
-        hits = self.store.query(
-            self.embedder.embed([question])[0], top_k=top_k, paper_ids=paper_ids
-        )
+        history = history or []
+        chunks, hits = self._retrieve(question, top_k, history, paper_ids)
         if not hits:
             return AskResponse(answer=REFUSAL_TEXT, sources=[], verified=True)
-
-        chunks = [h["chunk"] for h in hits]
         multi = len({c["paper_id"] for c in chunks}) > 1
-        prompt = _build_prompt(question, chunks, multi)
+        prompt = _build_prompt(question, chunks, multi, history)
         raw = await self.chat.chat(
             [
                 {
@@ -146,46 +238,61 @@ class RagQAEngine:
             ]
         )
         answer, quote_map = _parse_answer(raw or "")
+        sources, verified = _verify_sources(answer, quote_map, chunks, hits)
+        return AskResponse(answer=answer or REFUSAL_TEXT, sources=sources, verified=verified)
 
-        cited: list[int] = []
-        for m in _CITE_RE.finditer(answer):
-            idx = int(m.group(1))
-            if idx not in cited:
-                cited.append(idx)
+    async def ask_stream(
+        self,
+        question: str,
+        paper_ids: list[str] | None = None,
+        top_k: int = 5,
+        history: list[dict[str, str]] | None = None,
+    ):
+        """流式问答：检索 → 逐段产出正文增量（吞掉 QUOTES 引文块）→ 收尾产出校验结果。
 
-        if not cited:
-            verified = REFUSAL_TEXT in answer
-            return AskResponse(answer=answer or REFUSAL_TEXT, sources=[], verified=verified)
+        事件契约：{"type":"delta","delta":str} 逐段正文；
+        {"type":"done","answer":str,"sources":list,"verified":bool} 收尾全量结果。
+        """
+        question = question.strip()
+        if not question:
+            raise RagError("question 不能为空")
+        if top_k <= 0:
+            raise RagError("top_k 必须为正整数")
+        history = history or []
+        chunks, hits = self._retrieve(question, top_k, history, paper_ids)
+        if not hits:
+            yield {"type": "done", "answer": REFUSAL_TEXT, "sources": [], "verified": True}
+            return
+        multi = len({c["paper_id"] for c in chunks}) > 1
+        prompt = _build_prompt(question, chunks, multi, history)
 
-        sources: list[SourceOut] = []
-        all_ok = True
-        for idx in cited:
-            if 1 <= idx <= len(chunks):
-                chunk = chunks[idx - 1]
-                quote = quote_map.get(idx, "")
-                ok = bool(quote) and quote in chunk["text"]
-                if not ok:
-                    all_ok = False
-                sources.append(
-                    SourceOut(
-                        chunk_id=chunk["chunk_id"],
-                        paper_id=chunk["paper_id"],
-                        page_no=chunk["page_no"],
-                        quote=quote,
-                        score=float(hits[idx - 1]["score"]),
-                        verified=ok,
-                    )
-                )
-            else:
-                all_ok = False
-                sources.append(
-                    SourceOut(
-                        chunk_id=f"S{idx}",
-                        paper_id="",
-                        page_no=0,
-                        quote=quote_map.get(idx, ""),
-                        score=0.0,
-                        verified=False,
-                    )
-                )
-        return AskResponse(answer=answer, sources=sources, verified=all_ok)
+        raw_parts: list[str] = []
+        pending = ""  # 尾部暂存：防止把 QUOTES_MARKER 半截前缀先发给用户
+        quotes_seen = False
+        async for piece in self.chat.chat_stream([{"role": "user", "content": prompt}]):
+            raw_parts.append(piece)
+            if quotes_seen:
+                continue
+            pending += piece
+            if QUOTES_MARKER in pending:
+                pre, _, _ = pending.partition(QUOTES_MARKER)
+                if pre:
+                    yield {"type": "delta", "delta": pre}
+                pending = ""
+                quotes_seen = True
+                continue
+            keep = len(QUOTES_MARKER) - 1
+            if len(pending) > keep:
+                emit = pending[:-keep] if keep else pending
+                pending = pending[len(emit) :]
+                yield {"type": "delta", "delta": emit}
+        if not quotes_seen and pending:
+            yield {"type": "delta", "delta": pending}
+        answer, quote_map = _parse_answer("".join(raw_parts))
+        sources, verified = _verify_sources(answer, quote_map, chunks, hits)
+        yield {
+            "type": "done",
+            "answer": answer or REFUSAL_TEXT,
+            "sources": sources,
+            "verified": verified,
+        }

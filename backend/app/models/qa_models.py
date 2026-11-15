@@ -4,6 +4,13 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 
+class ChatTurnIn(BaseModel):
+    """一轮已完成的问答（多轮追问的记忆入参）。"""
+
+    question: str = Field(min_length=1, description="用户问题")
+    answer: str = Field(description="助手回答（不含引文块）")
+
+
 class AskRequest(BaseModel):
     """问答请求。"""
 
@@ -12,6 +19,9 @@ class AskRequest(BaseModel):
         default=None, description="限定论文 id；为空则检索全部已索引论文"
     )
     top_k: int = Field(default=5, ge=1, le=20, description="召回块数")
+    history: list[ChatTurnIn] = Field(
+        default_factory=list, description="同会话此前问答历史（多轮追问用）"
+    )
 
 
 class SourceOut(BaseModel):

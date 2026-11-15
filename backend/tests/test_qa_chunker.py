@@ -84,9 +84,9 @@ def test_chunker_rejects_bad_contract():
         chunk_paper({"paper_id": "", "pages": []})
 
 
-def test_vector_store_ranking():
+def test_vector_store_ranking(tmp_path):
     """向量检索按余弦相似度降序，命中最相关的块。"""
-    store = NumpyVectorStore()
+    store = NumpyVectorStore(index_dir=tmp_path)
     emb = HashEmbedding()
     papers = [ATTN_PAPER, BERT_PAPER, RAG_PAPER]
     chunks = [c for p in papers for c in chunk_paper(p)]
@@ -100,9 +100,9 @@ def test_vector_store_ranking():
     assert "Adam optimizer" in hits[0]["chunk"]["text"]
 
 
-def test_vector_store_paper_filter():
+def test_vector_store_paper_filter(tmp_path):
     """paper_ids 过滤只返回指定论文的块（单篇细粒度 / 多篇并集）。"""
-    store = NumpyVectorStore()
+    store = NumpyVectorStore(index_dir=tmp_path)
     emb = HashEmbedding()
     chunks = [c for p in (ATTN_PAPER, BERT_PAPER, RAG_PAPER) for c in chunk_paper(p)]
     store.add(chunks, emb.embed([c["text"] for c in chunks]))
