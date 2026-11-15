@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Empty, Input, Progress, Segmented, Spin, Tag } from 'antd'
 import * as api from '../api'
+import * as pdf from '../pdf'
 import { ErrorNotice } from './ModelNotice'
 import type {
   BlockTranslation,
@@ -56,9 +57,15 @@ export default function TranslationPanel({ paper, parsed, selection }: Props) {
   const [ptLoading, setPtLoading] = useState(false)
   const [ptError, setPtError] = useState<unknown>(null)
   const [degraded, setDegraded] = useState(false)
+  const [zoomed, setZoomed] = useState(false)
   const srcColRef = useRef<HTMLDivElement>(null)
   const dstColRef = useRef<HTMLDivElement>(null)
+  const zoomSrcRef = useRef<HTMLDivElement>(null)
+  const zoomDstRef = useRef<HTMLDivElement>(null)
+  const zoomDocRef = useRef<{ id: string; doc: Awaited<ReturnType<typeof pdf.loadDocument>> } | null>(null)
+  const [zoomPdfOk, setZoomPdfOk] = useState<boolean | null>(null)
   const syncing = useRef(false)
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // 阅读器划词 → 同步到翻译卡片
   useEffect(() => {
@@ -93,6 +100,15 @@ export default function TranslationPanel({ paper, parsed, selection }: Props) {
       if (!paper) return
       setPtLoading(true)
       setPtError(null)
+      // 整篇翻译是长任务：期间每 3 秒轮询进度，让译好的页实时上屏
+      if (fill && pollRef.current === null) {
+        pollRef.current = setInterval(() => {
+          void api
+            .translatePaper(paper.paper_id, direction, false)
+            .then((snap) => setPt(snap))
+            .catch(() => {})
+        }, 3000)
+      }
       try {
         const res = await api.translatePaper(paper.paper_id, direction, fill)
         setPt(res)
@@ -106,13 +122,129 @@ export default function TranslationPanel({ paper, parsed, selection }: Props) {
           setPtError(e)
         }
       } finally {
+        if (pollRef.current !== null) {
+          clearInterval(pollRef.current)
+          pollRef.current = null
+        }
         setPtLoading(false)
       }
     },
     [paper, direction],
   )
 
+  // 组件卸载时停掉轮询
+  useEffect(
+    () => () => {
+      if (pollRef.current !== null) clearInterval(pollRef.current)
+    },
+    [],
+  )
+
+  // 放大对照层：Esc 关闭
+  useEffect(() => {
+    if (!zoomed) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setZoomed(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [zoomed])
+
   const rows = useMemo(() => buildRows(pt, parsed), [pt, parsed])
+  const zoomPages = useMemo(() => {
+    const pages = new Set<number>()
+    for (const r of rows) pages.add(r.page_no)
+    return Array.from(pages).sort((a, b) => a - b)
+  }, [rows])
+
+  /** 缩放层按「页」对齐滚动（左 PDF 页 ↔ 右页码标记） */
+  const syncByPage = useCallback(
+    (from: HTMLDivElement, to: HTMLDivElement, fromSel: string, toSel: string) => {
+      if (syncing.current) return
+      syncing.current = true
+      const fromEls = Array.from(from.querySelectorAll<HTMLElement>(fromSel))
+      const toEls = Array.from(to.querySelectorAll<HTMLElement>(toSel))
+      if (fromEls.length > 0 && toEls.length > 0) {
+        const top = from.scrollTop
+        let idx = 0
+        for (let i = 0; i < fromEls.length; i++) {
+          if (fromEls[i].offsetTop <= top + 6) idx = i
+          else break
+        }
+        const dest = toEls[Math.min(idx, toEls.length - 1)]
+        if (dest) to.scrollTop = Math.max(dest.offsetTop - 6, 0)
+      }
+      requestAnimationFrame(() => {
+        syncing.current = false
+      })
+    },
+    [],
+  )
+
+  // 放大层左栏：懒渲染 PDF 原页（滚到哪页渲哪页），拿不到 PDF 则降级为文字列
+  useEffect(() => {
+    if (!zoomed) return
+    let cancelled = false
+    let observer: IntersectionObserver | null = null
+    void (async () => {
+      let doc: Awaited<ReturnType<typeof pdf.loadDocument>> | null = null
+      try {
+        if (paper) {
+          if (zoomDocRef.current?.id !== paper.paper_id) {
+            const bytes = await api.fetchPaperPdf(paper.paper_id)
+            if (cancelled) return
+            if (!bytes) throw new Error('pdf missing')
+            const loaded = await pdf.loadDocument(bytes)
+            if (cancelled) return
+            zoomDocRef.current = { id: paper.paper_id, doc: loaded }
+          }
+          doc = zoomDocRef.current?.doc ?? null
+        }
+        if (!doc) throw new Error('pdf missing')
+      } catch {
+        if (!cancelled) setZoomPdfOk(false)
+        return
+      }
+      if (cancelled) return
+      const activeDoc = doc
+      setZoomPdfOk(true)
+      await new Promise((resolve) => requestAnimationFrame(resolve))
+      const root = zoomSrcRef.current
+      if (cancelled || !root) return
+      const renderOne = async (pageNo: number, canvas: HTMLCanvasElement) => {
+        if (canvas.dataset.rendered === '1') return
+        canvas.dataset.rendered = '1'
+        try {
+          const page = await activeDoc.getPage(pageNo)
+          const base = page.getViewport({ scale: 1 }).width
+          const dpr = Math.min(window.devicePixelRatio || 1, 2)
+          const width = root.clientWidth - 32
+          const scale = base > 0 && width > 0 ? (width / base) * dpr : 1.2
+          await pdf.renderPageToCanvas(page, canvas, scale)
+        } catch {
+          canvas.dataset.rendered = '0'
+        }
+      }
+      const obs = new IntersectionObserver(
+        (entries) => {
+          for (const en of entries) {
+            if (!en.isIntersecting) continue
+            const el = en.target as HTMLElement
+            const canvas = el.querySelector('canvas')
+            const pageNo = Number(el.dataset.page)
+            if (canvas && pageNo > 0) void renderOne(pageNo, canvas)
+          }
+        },
+        { root, rootMargin: '800px 0px' },
+      )
+      observer = obs
+      root.querySelectorAll<HTMLElement>('.zoom-pdf-page').forEach((el) => obs.observe(el))
+    })()
+    return () => {
+      cancelled = true
+      observer?.disconnect()
+    }
+  }, [zoomed, paper, zoomPages])
 
   // 双向同步滚动：按对照行对齐（block_index 同序渲染）
   const syncScroll = useCallback((from: HTMLDivElement, to: HTMLDivElement) => {
@@ -158,6 +290,9 @@ export default function TranslationPanel({ paper, parsed, selection }: Props) {
           <Button size="small" loading={ptLoading} disabled={!paper} onClick={() => void runPaperTranslate(false)}>
             刷新进度
           </Button>
+          <Button size="small" disabled={rows.length === 0} onClick={() => { setZoomPdfOk(null); setZoomed(true) }}>
+            放大
+          </Button>
         </div>
       </div>
 
@@ -190,12 +325,18 @@ export default function TranslationPanel({ paper, parsed, selection }: Props) {
             <>
               <Progress percent={progress} size="small" status={pt.done ? 'success' : 'active'} />
               <span className="progress-text">
-                已译 {pt.translated_pages}/{pt.total_pages} 页 {pt.done ? '· 完成' : ''}
+                已译 {pt.translated_pages}/{pt.total_pages} 页 {pt.done ? '· 完成' : ptLoading ? '· 翻译中，每 3 秒自动刷新' : ''}
               </span>
             </>
           )}
           {degraded && <span className="progress-text">模型服务未配置，下列对照仅展示原文（block 对齐布局）</span>}
-          {!pt && !degraded && <span className="progress-text">点击「整篇翻译」生成中英对照（缺页自动补译）</span>}
+          {!pt && !degraded && (
+            <span className="progress-text">
+              {ptLoading
+                ? '正在翻译…已译的页会自动出现（长论文首次需几分钟，译过的论文之后秒开）'
+                : '点击「整篇翻译」生成中英对照（缺页自动补译）'}
+            </span>
+          )}
         </div>
 
         {ptError ? <ErrorNotice error={ptError} /> : null}
@@ -240,6 +381,63 @@ export default function TranslationPanel({ paper, parsed, selection }: Props) {
         )}
         {lastPage > 0 && rows.length > 0 && <div className="bi-hint">共 {lastPage} 页 · {rows.length} 个对照行 · 双向滚动同步</div>}
       </div>
+
+      {zoomed && (
+        <div className="zoom-overlay" onClick={() => setZoomed(false)}>
+          <div className="zoom-panel" onClick={(e) => e.stopPropagation()}>
+            <div className="zoom-head">
+              <span className="zoom-title">{paper ? `${paper.title} · ` : ''}中英对照（大字阅读）</span>
+              <Button size="small" onClick={() => setZoomed(false)}>关闭</Button>
+            </div>
+            <div className="zoom-body">
+              {zoomPdfOk === false ? (
+                <div
+                  className="zoom-col"
+                  ref={zoomSrcRef}
+                  onScroll={() => zoomSrcRef.current && zoomDstRef.current && syncByPage(zoomSrcRef.current, zoomDstRef.current, '.bi-page', '.bi-page')}
+                >
+                  {rows.map((row) => (
+                    <div className="bi-row" key={row.key}>
+                      {row.block_index === 0 && <div className="bi-page">第 {row.page_no} 页</div>}
+                      <div className="bi-src">{row.src_text}</div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div
+                  className="zoom-col zoom-pdf"
+                  ref={zoomSrcRef}
+                  onScroll={() => zoomSrcRef.current && zoomDstRef.current && syncByPage(zoomSrcRef.current, zoomDstRef.current, '.zoom-pdf-page', '.bi-page')}
+                >
+                  {zoomPdfOk === null && <div className="zoom-pdf-loading">PDF 原件加载中…</div>}
+                  {zoomPages.map((pageNo) => (
+                    <div className="zoom-pdf-page" key={pageNo} data-page={pageNo}>
+                      <div className="bi-page">第 {pageNo} 页</div>
+                      <canvas />
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div
+                className="zoom-col zoom-dst"
+                ref={zoomDstRef}
+                onScroll={() => zoomDstRef.current && zoomSrcRef.current && syncByPage(zoomDstRef.current, zoomSrcRef.current, '.bi-page', zoomPdfOk === true ? '.zoom-pdf-page' : '.bi-page')}
+              >
+                {rows.map((row) => (
+                  <div className="bi-row" key={row.key}>
+                    {row.block_index === 0 && <div className="bi-page">第 {row.page_no} 页</div>}
+                    {row.dst_text ? (
+                      <div className="bi-dst">{row.dst_text}</div>
+                    ) : (
+                      <div className="bi-dst bi-pending">{degraded ? '模型服务未配置' : '待翻译'}</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   )
 }
