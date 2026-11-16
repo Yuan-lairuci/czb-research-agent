@@ -1,37 +1,57 @@
-# 科研助手 Agent
+# 科研助手 Agent（CiteScout）
 
-> 2026 传智杯 AI 大模型创新应用挑战赛参赛作品 · 工程骨架
-> 当前版本：0.1.0（骨架阶段）
+> 2026 传智杯「AI 大模型创新应用挑战赛」参赛作品 · 智领科研·意图驱动
+> 当前版本：1.0.0
 
-## 项目简介
+面向科研全流程的智能助手 Agent：PDF 文献库与细粒度解析、抗幻觉 RAG 问答（多轮对话 + 出处溯源）、
+版式感知阅读与中英双向对照翻译、文献检索追踪推荐、引用图谱挖掘、写作 Copilot —— 六大模块一体。
 
-（占位）面向科研全流程的智能助手 Agent：围绕文献检索、论文解析、知识问答、综述生成、
-图表辅助与写作润色六大方向，构建可扩展的 AI 大模型创新应用。具体产品定位待模块开发阶段细化。
+## 功能总览
 
-## 技术架构
+| 模块 | 能力 |
+| --- | --- |
+| 文献库 | PDF 上传解析（标题/页块/参考文献）、OCR 扫描件、语义去重与版本管理（LLM 版本差异总结） |
+| 阅读器 + 翻译 | pdf.js 版式渲染、逐页/整篇中英双向翻译、双栏对照、放大全屏、引用标记跳转 |
+| AI 问答 | RAG 检索增强问答、Token 级流式输出（SSE）、多轮对话记忆、逐条出处溯源（页码+原文引文+置信度）、导出 Markdown |
+| 检索推荐 | 多源文献检索、引用含金量筛选、一键入库、arXiv 追踪、GitHub 代码推荐 |
+| 引用图谱 | PageRank/中心性挖掘基石节点、引用关系图谱、Future Work 去重归纳 |
+| 写作 Copilot | 语言润色、TikZ/Graphviz/Mermaid/Matplotlib 图表生成、CSV→图表、Figure Caption 生成 |
 
-- **后端**：Python 3.11+ / FastAPI / ChromaDB（嵌入式向量库）/ PyMuPDF（PDF 解析）
-- **前端**：React 18 + Vite + TypeScript；PDF 渲染预留 pdfjs-dist / react-pdf，图表预留 ECharts
-- **LLM 接入**：仅走 OpenAI 兼容 HTTP 接口（`/chat/completions`，支持流式 SSE），配置全部来自环境变量
-- **代码规范**：Ruff（后端）+ ESLint（前端）
-- **部署**：Docker Compose（backend + frontend 两个服务）
+## 架构
 
 ```
-浏览器 ──> frontend (React + Vite) ──> backend (FastAPI) ──> OpenAI 兼容 LLM 服务
-                                        ├──> ChromaDB 向量库（RAG）
-                                        └──> 本地文献库（PyMuPDF 解析）
+浏览器 ──> frontend (React 18 + Vite + TS + antd + pdf.js)
+              │  fetch /api/*（同源或 VITE_API_BASE）
+              ▼
+          backend (FastAPI) ──> OpenAI 兼容 LLM（DeepSeek / GPT 等，SSE 流式）
+              ├──> 向量检索（OpenAI 兼容 Embedding，支持 Ollama bge-m3；未配置自动回退内置 Hash 嵌入）
+              ├──> 文献库（PyMuPDF 解析 + SQLite 元数据 + 本地文件存储）
+              └──> 翻译/图谱/推荐/写作 各服务
 ```
 
 ## 快速开始
 
-### 方式一：Docker Compose 一键启动
+### 方式一：Docker Compose 一键启动（推荐，评分复现路径）
 
 ```bash
-cp .env.example .env   # 按需填写真实配置（严禁提交 .env）
+cp .env.example backend/.env      # 填入 LLM 密钥（严禁提交 .env）
 docker compose up --build
-# 前端：http://localhost:5173
-# 后端：http://localhost:8000
+# 打开 http://localhost:8080
 ```
+
+- 需要 Docker Desktop / Docker Engine + Compose v2。
+- **国内网络加速**（镜像拉不动时）：
+
+```bash
+REGISTRY=docker.1ms.run/ \
+PIP_INDEX=https://mirrors.aliyun.com/pypi/simple/ \
+NPM_REGISTRY=https://registry.npmmirror.com \
+docker compose up --build
+```
+
+- 未配置 EMBEDDING_MODEL 时后端自动使用内置 Hash 嵌入，**零外部依赖即可完整运行**；
+  配置 bge-m3（Ollama）可获得最佳中英文检索效果，容器内已映射宿主 host.docker.internal:11434。
+- 数据持久化：backend/data/ 挂载进容器，上传的文献与索引保留在宿主机。
 
 ### 方式二：本地开发
 
@@ -41,7 +61,7 @@ docker compose up --build
 cd backend
 python -m venv venv
 # Windows: venv\Scripts\activate    Linux/macOS: source venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements.txt -r requirements-qa.txt -r requirements-pdf.txt
 uvicorn app.main:app --reload --port 8000
 ```
 
@@ -53,57 +73,53 @@ npm install
 npm run dev   # http://localhost:5173
 ```
 
-健康检查验证：`curl http://localhost:8000/health` 应返回 `{"status":"ok","version":"0.1.0"}`。
+健康检查：curl http://localhost:8000/health 应返回 {"status":"ok","version":"0.1.0"}。
 
-## 环境变量
+## 环境变量（backend/.env）
 
 | 变量 | 说明 | 示例 |
 | --- | --- | --- |
-| `LLM_BASE_URL` | LLM 服务 Base URL（OpenAI 兼容网关） | `https://api.openai.com/v1` |
-| `LLM_API_KEY` | LLM 服务 API Key（**严禁提交真实密钥**） | `your-api-key-here` |
-| `LLM_MODEL` | 对话模型名称 | `your-model-name` |
-| `EMBEDDING_MODEL` | 嵌入模型名称 | `your-embedding-model` |
-| `EMBEDDING_BASE_URL` | 嵌入服务 Base URL（留空则回退 `LLM_BASE_URL`） | `https://api.openai.com/v1` |
+| LLM_BASE_URL | LLM 服务 Base URL（OpenAI 兼容网关） | https://api.deepseek.com/v1 |
+| LLM_API_KEY | LLM 服务 API Key（**严禁提交真实密钥**） | sk-... |
+| LLM_MODEL | 对话模型名称 | deepseek-chat |
+| EMBEDDING_MODEL | 嵌入模型名；**留空回退内置 Hash 嵌入** | bge-m3 |
+| EMBEDDING_BASE_URL | 嵌入服务 Base URL（本地 Ollama 为 http://127.0.0.1:11434/v1） | http://127.0.0.1:11434/v1 |
+| EMBEDDING_API_KEY | 嵌入服务 API Key（如需） | 可留空 |
 
-配置读取入口：`backend/app/core/config.py`（全部从环境变量读取）；
-`.env.example` 为变量模板，真实值写入 `.env`（已被 `.gitignore` 忽略）。
+配置读取入口：backend/app/core/config.py（环境变量优先，其次 backend/.env 与仓库根 .env）；
+.env.example 为变量模板。**Docker 下向量服务地址固定为 host.docker.internal:11434**（compose environment 覆盖）。
 
 ## 目录结构
 
 ```
 czb_research_agent/
-├── backend/                  # 后端（FastAPI）
+├── backend/
 │   ├── app/
-│   │   ├── main.py           # 应用入口（含 CORS 配置）
-│   │   ├── api/              # API 路由（/health 等）
-│   │   ├── services/         # 业务服务（chat_service：OpenAI 兼容流式封装）
-│   │   ├── models/           # 数据模型（Pydantic schemas）
-│   │   └── core/             # 核心配置（config.py：环境变量读取）
-│   ├── tests/                # 后端测试
-│   ├── requirements.txt      # 运行时依赖
-│   ├── requirements-dev.txt  # 开发/测试依赖
-│   └── ruff.toml             # Ruff 配置
-├── frontend/                 # 前端（React 18 + Vite + TS）
+│   │   ├── main.py           # 应用入口（CORS、路由挂载）
+│   │   ├── api/              # pdf_library / qa / translate / writing / graph / recommend
+│   │   ├── services/         # rag_qa / translate_llm / pdf_dedup / graph_build / recommend / writing / chat_service / embedding / ocr
+│   │   ├── models/           # Pydantic 契约（ParsedPaper / QA / 翻译）
+│   │   └── core/config.py    # 环境配置
+│   ├── data/                 # 文献库数据（解析结果/索引/翻译缓存，已 gitignore）
+│   ├── tests/                # pytest 测试
+│   └── requirements*.txt     # 运行依赖（分模块）
+├── frontend/
 │   ├── src/
-│   │   ├── App.tsx           # 首页（标题：科研助手 Agent）
-│   │   ├── components/       # 组件（HealthStatus：调用 /health 显示状态）
-│   │   └── integrations/     # 预留集成（PDF / ECharts）
-│   ├── package.json
+│   │   ├── App.tsx           # 六视图切换（文献库/阅读器+翻译/AI问答/检索推荐/引用图谱/写作）
+│   │   ├── components/       # LibraryPanel / ReaderPanel / TranslationPanel / QaPanel / ...
+│   │   ├── pdf.ts            # pdf.js 封装（渲染/文本层）
+│   │   └── api.ts            # 后端 API 客户端（含 SSE 流式问答）
 │   └── vite.config.ts
-├── docker/                   # Dockerfile（backend / frontend）
-├── docker-compose.yml        # 一键编排
+├── docker/                   # backend.Dockerfile / frontend.Dockerfile / nginx.conf
+├── docker-compose.yml        # 一键编排（:8080）
 ├── .env.example              # 环境变量模板（无真实密钥）
 └── README.md
 ```
 
-## 六大功能模块（占位章节）
+## 测试
 
-1. **文献智能检索**（占位）——多源学术检索与筛选，待细化接口设计。
-2. **PDF 文献解析与精读**（占位）——PyMuPDF 解析 + 前端渲染（预留 pdfjs-dist / react-pdf）。
-3. **知识库管理与 RAG 问答**（占位）——ChromaDB 向量库 + 检索增强问答。
-4. **研究综述自动生成**（占位）——基于文献集合的综述/对比分析生成。
-5. **数据图表辅助**（占位）——实验数据可视化（预留 ECharts）。
-6. **论文写作润色助手**（占位）——中英文写作润色与格式规范。
+```bash
+cd backend && python -m pytest tests/ -q
+```
 
-> 注：模块名称为骨架占位，随开发推进可能调整；各模块并行开发，代码落位于
-> `backend/app/services/` 与 `frontend/src/` 对应子目录。
+核心契约测试：RAG 问答溯源、翻译引擎（空块跳 LLM/缓存/补译）、PDF 语义去重、版本差异。
