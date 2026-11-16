@@ -23,6 +23,23 @@ QUOTES_MARKER = "---QUOTES---"
 REFUSAL_TEXT = "资料中未找到"
 _CITE_RE = re.compile(r"\[S(\d+)\]")
 _QUOTE_RE = re.compile(r"^\[S(\d+)\]\s*(.+)$")
+_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+_REWRITE_PROMPT = (
+    "你是学术检索助手。把下面的研究问题改写成一条英文检索查询，"
+    "用于在英文学术论文库中做向量检索。保留模型名、方法名等专有名词原文；"
+    "只输出一行英文查询，不超过 12 个词，不要任何解释。\n\n问题：{q}"
+)
+
+
+def _clean_rewrite(raw: str) -> str | None:
+    """改写结果清洗：取首行、去引号；无英文词或夹带引文标记则弃用。"""
+    text = (raw or "").strip()
+    if not text:
+        return None
+    line = text.splitlines()[0].strip().strip("\"'“”‘’ ")
+    if QUOTES_MARKER in line or not re.search(r"[A-Za-z]{2,}", line):
+        return None
+    return line[:200]
 
 
 class RagError(RuntimeError):
@@ -199,11 +216,14 @@ class RagQAEngine:
         top_k: int,
         history: list[dict[str, str]],
         paper_ids: list[str] | None,
+        extra_queries: list[str] | None = None,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """多轮检索：本问 + 「上一问+本问」组合查询各检一路再合并——
         组合查询补上指代实体("它"→Llama 2)，加宽与不截断保证追问命中不被上一轮高分块挤掉。
         """
         embed_texts = [question]
+        if extra_queries:
+            embed_texts.extend(extra_queries)
         if history:
             embed_texts.append(history[-1]["question"] + " " + question)
         vecs = self.embedder.embed(embed_texts)
@@ -215,6 +235,51 @@ class RagQAEngine:
                 cid = h["chunk"]["chunk_id"]
                 if cid not in merged or h["score"] > merged[cid]["score"]:
                     merged[cid] = h
+        hits = sorted(merged.values(), key=lambda h: h["score"], reverse=True)
+        return [h["chunk"] for h in hits], hits
+
+    async def _rewrite_query(
+        self, question: str, history: list[dict[str, str]]
+    ) -> str | None:
+        """中文问题 → LLM 改写英文检索词（跨语言补齐）；非中文不动，失败静默降级。"""
+        if not _CJK_RE.search(question):
+            return None
+        q = question
+        if history:
+            q = "上一问：" + history[-1]["question"] + "\n本问：" + question
+        try:
+            raw = await self.chat.chat(
+                [{"role": "user", "content": _REWRITE_PROMPT.format(q=q)}],
+                temperature=0,
+                max_tokens=64,
+            )
+        except Exception:
+            return None
+        return _clean_rewrite(raw or "")
+
+    async def _retrieve_smart(
+        self,
+        question: str,
+        top_k: int,
+        history: list[dict[str, str]],
+        paper_ids: list[str] | None,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """两段式检索：先用原问检索（零命中直接空返回，不浪费 LLM 调用）；
+        中文问题再改写英文检索词补一路，两路命中并集按 chunk 取高分。"""
+        chunks, hits = self._retrieve(question, top_k, history, paper_ids)
+        if not hits:
+            return chunks, hits
+        en = await self._rewrite_query(question, history)
+        if not en:
+            return chunks, hits
+        _, hits2 = self._retrieve(
+            question, top_k, history, paper_ids, extra_queries=[en]
+        )
+        merged: dict[str, dict[str, Any]] = {h["chunk"]["chunk_id"]: h for h in hits}
+        for h in hits2:
+            cid = h["chunk"]["chunk_id"]
+            if cid not in merged or h["score"] > merged[cid]["score"]:
+                merged[cid] = h
         hits = sorted(merged.values(), key=lambda h: h["score"], reverse=True)
         return [h["chunk"] for h in hits], hits
 
@@ -232,7 +297,7 @@ class RagQAEngine:
         if top_k <= 0:
             raise RagError("top_k 必须为正整数")
         history = history or []
-        chunks, hits = self._retrieve(question, top_k, history, paper_ids)
+        chunks, hits = await self._retrieve_smart(question, top_k, history, paper_ids)
         if not hits:
             return AskResponse(answer=REFUSAL_TEXT, sources=[], verified=True)
         multi = len({c["paper_id"] for c in chunks}) > 1
@@ -267,7 +332,7 @@ class RagQAEngine:
         if top_k <= 0:
             raise RagError("top_k 必须为正整数")
         history = history or []
-        chunks, hits = self._retrieve(question, top_k, history, paper_ids)
+        chunks, hits = await self._retrieve_smart(question, top_k, history, paper_ids)
         if not hits:
             yield {"type": "done", "answer": REFUSAL_TEXT, "sources": [], "verified": True}
             return
