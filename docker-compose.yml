@@ -1,27 +1,44 @@
-# 科研助手 Agent —— 一键编排：backend + frontend
+# 科研助手 Agent —— 一键编排：backend + frontend（Nginx 反代 /api）
+# 启动：cp .env.example backend/.env  # 填入你的 LLM 密钥（严禁提交）
+#        docker compose up --build
+# 打开：http://localhost:8080
 services:
   backend:
     build:
       context: .
       dockerfile: docker/backend.Dockerfile
+      args:
+        REGISTRY: ${REGISTRY:-}
+        PIP_INDEX: ${PIP_INDEX:-https://pypi.org/simple}
     container_name: czb-backend
-    ports:
-      - "8000:8000"
+    env_file:
+      - path: .env
+        required: false
+      - path: backend/.env
+        required: false
     environment:
-      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.openai.com/v1}
-      LLM_API_KEY: ${LLM_API_KEY:-}
-      LLM_MODEL: ${LLM_MODEL:-}
-      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-}
-      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
+      # 容器内 127.0.0.1 不是宿主机：向量服务统一走 host.docker.internal（宿主 Ollama）
+      # 未配置 EMBEDDING_MODEL 时后端自动回退内置 Hash 嵌入，零外部依赖也能跑
+      EMBEDDING_BASE_URL: http://host.docker.internal:11434/v1
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./backend/data:/srv/app/data
+    expose:
+      - "8000"
     restart: unless-stopped
 
   frontend:
     build:
       context: .
       dockerfile: docker/frontend.Dockerfile
+      args:
+        VITE_API_BASE: ""
+        REGISTRY: ${REGISTRY:-}
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
     container_name: czb-frontend
     ports:
-      - "5173:80"
+      - "8080:80"
     depends_on:
       - backend
     restart: unless-stopped

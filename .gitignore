@@ -32,3 +32,4 @@ backend/data/
 pip-unpack-*/
 pytest-of-yuanl/
 backend/tmpsp_*/
+dist_server/
