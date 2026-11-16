@@ -100,16 +100,16 @@
   min-height: 0;
 }
 .panel-library {
-  width: 300px;
-  flex-shrink: 0;
+  flex: 1;
+  min-width: 0;
 }
 .panel-reader {
   flex: 1;
   min-width: 0;
 }
 .panel-qa {
-  width: 360px;
-  flex-shrink: 0;
+  flex: 1;
+  min-width: 0;
 }
 .panel-head {
   display: flex;
@@ -163,8 +163,9 @@
   flex: 1;
   overflow-y: auto;
   padding: 10px 12px;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  align-content: start;
   gap: 10px;
 }
 .paper-card {
@@ -638,6 +639,19 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+/* 宽屏下问答内容居中收拢成阅读列，避免气泡和来源卡无限拉宽 */
+.panel-qa .qa-thread {
+  align-items: center;
+}
+.panel-qa .qa-turn {
+  width: min(100%, 960px);
+}
+.panel-qa .qa-input {
+  align-items: center;
+}
+.panel-qa .qa-input > * {
+  width: min(100%, 960px);
 }
 
 /* ---------- 底栏·翻译占位 ---------- */

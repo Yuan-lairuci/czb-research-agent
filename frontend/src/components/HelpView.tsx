@@ -1,4 +1,4 @@
-import { Alert, Card, Col, Row, Tag, Typography } from 'antd'
+import { Card, Col, Row, Tag, Typography } from 'antd'
 
 const { Title, Paragraph, Text } = Typography
 
@@ -9,7 +9,7 @@ const MODULES = [
   { key: '检索推荐', desc: 'Semantic Scholar / arXiv 双源检索、一键入库、按论文推荐、arXiv 版本追踪、赞踩反馈。' },
   { key: '引用图谱', desc: '文献互引图谱构建 → 中心性分析（PageRank）→ 综述生成（[n] 标注可溯源）→ 未来工作时间线。' },
   { key: '写作 Copilot', desc: '论文提纲生成、参考文献核验（已验证/丢弃分栏）、TikZ/Graphviz/Mermaid 图表代码、CSV 图表渲染。' },
-  { key: '帮助', desc: '本页：功能地图、演示路线与降级说明。' },
+  { key: '帮助', desc: '本页：功能地图、演示路线与技术栈。' },
 ]
 
 export default function HelpView() {
@@ -59,13 +59,6 @@ export default function HelpView() {
         </Paragraph>
       </Card>
 
-      <Alert
-        className="help-degrade"
-        type="info"
-        showIcon
-        title="降级说明"
-        description="未配置大模型密钥时，AI 生成类功能显示「模型服务未配置」占位，其余功能（文献管理、检索、图谱统计、图表渲染、参考文献核验的来源部分）仍可正常使用；综述与中心性解读在无模型时自动切换为模板生成，保证演示不中断。"
-      />
     </div>
   )
 }
