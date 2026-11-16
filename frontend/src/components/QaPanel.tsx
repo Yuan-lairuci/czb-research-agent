@@ -56,6 +56,10 @@ export default function QaPanel({ papers, selectedId, indexInfo, onJump }: Props
   const { message } = AntdApp.useApp()
   const [question, setQuestion] = useState('')
   const [onlyCurrent, setOnlyCurrent] = useState(false)
+  // 选中论文即自动限定：指定论文提问走馆内检索，避免全库高分块挤出目标答案
+  useEffect(() => {
+    setOnlyCurrent(!!selectedId)
+  }, [selectedId])
   const [turns, setTurns] = useState<ChatTurn[]>(loadThread)
   const [seq, setSeq] = useState(1)
 
