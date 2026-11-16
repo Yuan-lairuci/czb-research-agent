@@ -41,6 +41,12 @@ def default_parsed_dir() -> Path:
     return Path(__file__).resolve().parents[2] / "data" / "parsed"
 
 
+def _prompt_history(history: list[dict[str, str]]) -> list[dict[str, str]]:
+    """提示词历史剔除拒答轮：连续"未找到"会传染给模型诱发更多拒答；
+    拒答轮的问题仍参与检索（_retrieve 用完整历史做指代桥接）。"""
+    return [t for t in history if t.get("answer") and REFUSAL_TEXT not in t["answer"]]
+
+
 def _build_prompt(
     question: str,
     chunks: list[dict[str, Any]],
@@ -58,8 +64,9 @@ def _build_prompt(
         [
             "回答要求：",
             "1. 每个论断必须标注依据的来源编号，格式如 [S1]、[S2]；可以多处标注。",
-            "2. 只能依据资料回答，禁止编造；若资料中没有充分依据，直接回答"
-            f"\"{REFUSAL_TEXT}\"。",
+            "2. 只能依据资料回答，禁止编造；资料中只要有问题相关的内容，就必须作答，"
+            "可以归纳、概括、并列多点，不必拘泥于逐字对应；仅当资料与问题完全无关、"
+            f"没有任何可用信息时才回答\"{REFUSAL_TEXT}\"。",
             "3. 代码、公式、专有名词保留英文原样。",
             f"4. 回答正文结束后，单独一行输出 {QUOTES_MARKER}，然后为每个引用过的来源"
             "输出一行引文，格式：[S1] 后跟该来源中支持你论断的逐字原文（必须与资料完全一致，"
@@ -200,7 +207,8 @@ class RagQAEngine:
         if history:
             embed_texts.append(history[-1]["question"] + " " + question)
         vecs = self.embedder.embed(embed_texts)
-        width = top_k * 2 if history else top_k
+        # 检索面始终加宽一倍：间接提问（问名字/结论）的目标块常排在 top_k 名开外
+        width = top_k * 2
         merged: dict[str, dict[str, Any]] = {}
         for v in vecs:
             for h in self.store.query(v, top_k=width, paper_ids=paper_ids):
@@ -228,7 +236,7 @@ class RagQAEngine:
         if not hits:
             return AskResponse(answer=REFUSAL_TEXT, sources=[], verified=True)
         multi = len({c["paper_id"] for c in chunks}) > 1
-        prompt = _build_prompt(question, chunks, multi, history)
+        prompt = _build_prompt(question, chunks, multi, _prompt_history(history))
         raw = await self.chat.chat(
             [
                 {
@@ -264,7 +272,7 @@ class RagQAEngine:
             yield {"type": "done", "answer": REFUSAL_TEXT, "sources": [], "verified": True}
             return
         multi = len({c["paper_id"] for c in chunks}) > 1
-        prompt = _build_prompt(question, chunks, multi, history)
+        prompt = _build_prompt(question, chunks, multi, _prompt_history(history))
 
         raw_parts: list[str] = []
         pending = ""  # 尾部暂存：防止把 QUOTES_MARKER 半截前缀先发给用户

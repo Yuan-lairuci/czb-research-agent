@@ -84,7 +84,7 @@ export default function QaPanel({ papers, selectedId, indexInfo, onJump }: Props
           paper_ids: onlyCurrent && selectedId ? [selectedId] : undefined,
           top_k: 5,
           history: turns
-            .filter((t) => t.response && !t.error)
+            .filter((t) => t.response && !t.error && !t.response.answer.includes(REFUSAL))
             .slice(-4)
             .map((t) => ({ question: t.question, answer: t.response!.answer })),
         },
@@ -223,7 +223,7 @@ export default function QaPanel({ papers, selectedId, indexInfo, onJump }: Props
             )}
             {turn.response && (
               <div className="qa-answer-block">
-                {turn.response.answer.includes(REFUSAL) ? (
+                {turn.response.answer.includes(REFUSAL) && turn.response.sources.length === 0 ? (
                   <Alert
                     type="info"
                     showIcon
