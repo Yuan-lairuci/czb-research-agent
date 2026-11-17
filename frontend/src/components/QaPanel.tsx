@@ -61,7 +61,8 @@ export default function QaPanel({ papers, selectedId, indexInfo, onJump }: Props
     setOnlyCurrent(!!selectedId)
   }, [selectedId])
   const [turns, setTurns] = useState<ChatTurn[]>(loadThread)
-  const [seq, setSeq] = useState(1)
+  // seq 必须越过存档回合的最大 id：重挂载后归 1 会与旧回合撞号，流式更新会改写多个回合
+  const [seq, setSeq] = useState(() => Math.max(0, ...turns.map((t) => t.id)) + 1)
 
   useEffect(() => {
     try {
